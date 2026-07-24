@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Monitor, Wifi, WifiOff, Cpu, HardDrive, Clock, X, CheckCircle2, XCircle, Download, Globe, Power, RefreshCw, MessageSquare, Camera, AlertTriangle, Play, Square } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Monitor, Wifi, WifiOff, Cpu, HardDrive, Clock, X, CheckCircle2, XCircle, Download, Globe, Power, RefreshCw, MessageSquare, Camera, AlertTriangle, Play, Square, Maximize2, Code2, Wand2, Ban, ShieldCheck, ShieldAlert, Settings, Lock, Unlock } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -13,7 +13,7 @@ type PC = {
   cpu_usage: number;
   ram_usage: number;
   disk_usage: number;
-  last_seen: string;
+  lastSeen: string;
 };
 
 const REQUIRED_SOFTWARE = [
@@ -39,31 +39,111 @@ export default function Labs() {
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [issueDesc, setIssueDesc] = useState('');
   const [fullScreenPreview, setFullScreenPreview] = useState(false);
+  const [previewPc, setPreviewPc] = useState<any>(null);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ class_name: '', teacher: '', time: '' });
+  const [settings, setSettings] = useState({ autoShutdownEnabled: true, autoShutdownTime: '19:00', emailEnabled: false, emailSmtpHost: '', emailSmtpPort: 587, emailUser: '', emailPass: '', emailTo: '', examModeEnabled: false });
+  const [tempSettings, setTempSettings] = useState({ autoShutdownEnabled: true, autoShutdownTime: '19:00', emailEnabled: false, emailSmtpHost: '', emailSmtpPort: 587, emailUser: '', emailPass: '', emailTo: '', examModeEnabled: false });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{message: string, onConfirm: () => void} | null>(null);
 
-  const fetchLabs = () => {
-    fetch('/api/labs')
+  const fetchSettings = () => {
+    fetch('/api/settings')
       .then(res => res.json())
       .then(data => {
-        setLabs(data);
-        const rooms = Object.keys(data);
-        if (rooms.length > 0 && !selectedLab) setSelectedLab(rooms[0]);
-      });
+        setSettings(data);
+        setTempSettings(data);
+      })
+      .catch(() => {});
   };
 
-  useEffect(() => {
-    fetchLabs();
-      
+  const updateSettings = async (newSettings: any) => {
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings)
+      });
+      if (res.ok) {
+        setSettings(newSettings);
+        showToast('Settings updated successfully');
+        setShowSettingsModal(false);
+      }
+    } catch (e) {
+      showToast('Failed to update settings');
+    }
+  };
+
+  const openSettingsModal = () => {
+    setTempSettings(settings);
+    setShowSettingsModal(true);
+  };
+
+  const fetchSchedules = () => {
     fetch('/api/schedules')
       .then(res => res.json())
       .then(data => setSchedules(data))
       .catch(() => {});
+  };
+
+  const fetchLabs = () => {
+    fetch('/api/pcs')
+      .then(res => res.json())
+      .then(data => {
+        // Group PCs by room
+        const grouped = data.reduce((acc: any, pc: any) => {
+          if (!acc[pc.room]) acc[pc.room] = [];
+          acc[pc.room].push(pc);
+          return acc;
+        }, {});
+        setLabs(grouped);
+        const rooms = Object.keys(grouped);
+        if (rooms.length > 0 && !selectedLab) setSelectedLab(rooms[0]);
+      });
+  };
+
+  const clearAllData = async () => {
+    setConfirmDialog({
+      message: 'Are you sure you want to clear all PC data? This will remove all connected PCs from the dashboard.',
+      onConfirm: async () => {
+        try {
+          await fetch('/api/pcs/clear', { method: 'POST' });
+          showToast('All data reset to demo state');
+          fetchLabs();
+          fetchSchedules();
+          setSelectedPc(null);
+        } catch (e) {
+          showToast('Failed to clear data');
+        }
+        setConfirmDialog(null);
+      }
+    });
+  };
+
+  useEffect(() => {
+    fetchLabs();
+    fetchSchedules();
+    fetchSettings();
+
+    const interval = setInterval(() => {
+      fetchLabs();
+      fetchSchedules();
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     if (selectedPc) {
-      fetch(`/api/pcs/${selectedPc}`)
-        .then(res => res.json())
-        .then(data => setPcDetails(data));
+      const fetchDetails = () => {
+        fetch(`/api/pcs/${selectedPc}`)
+          .then(res => res.json())
+          .then(data => setPcDetails(data));
+      };
+      
+      fetchDetails();
+      const interval = setInterval(fetchDetails, 5000);
+      return () => clearInterval(interval);
     } else {
       setPcDetails(null);
     }
@@ -74,10 +154,76 @@ export default function Labs() {
     setTimeout(() => setToastMsg(''), 3000);
   };
 
+  const handleSaveSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await fetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: selectedLab, ...scheduleForm })
+      });
+      showToast('Schedule updated successfully');
+      setShowScheduleModal(false);
+      fetchSchedules();
+    } catch (e) {
+      showToast('Failed to update schedule');
+    }
+  };
+
+  const handleDeleteSchedule = async () => {
+    try {
+      await fetch(`/api/schedules/${selectedLab}`, { method: 'DELETE' });
+      showToast('Schedule removed');
+      setShowScheduleModal(false);
+      fetchSchedules();
+    } catch (e) {
+      showToast('Failed to remove schedule');
+    }
+  };
+
   const handleInstall = async (pcId: string, softwareName: string) => {
     handleAction(pcId, 'install_software', softwareName);
   };
 
+  const toggleExamMode = async () => {
+    const newMode = !settings.examModeEnabled;
+    setConfirmDialog({
+      message: `Are you sure you want to ${newMode ? 'ENABLE' : 'DISABLE'} Exam Mode? ${newMode ? 'This will block internet access and restrict software on all PCs.' : 'This will restore normal access.'}`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch('/api/exam-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: newMode })
+          });
+          if (res.ok) {
+            setSettings({ ...settings, examModeEnabled: newMode });
+            showToast(`Exam Mode ${newMode ? 'Enabled' : 'Disabled'}`);
+          }
+        } catch (e) {
+          showToast('Failed to toggle Exam Mode');
+        }
+        setConfirmDialog(null);
+      }
+    });
+  };
+
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastMsg) return;
+    try {
+      await fetch('/api/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: broadcastMsg, room: 'ALL' })
+      });
+      showToast('Broadcast message sent to all PCs');
+      setShowBroadcastModal(false);
+      setBroadcastMsg('');
+    } catch (e) {
+      showToast('Failed to send broadcast');
+    }
+  };
   const handleAction = async (pcId: string, action: string, target?: string) => {
     try {
       await fetch('/api/tasks', {
@@ -99,13 +245,15 @@ export default function Labs() {
 
   const handlePowerAction = async (pcId: string, action: 'shutdown' | 'restart' | 'wake') => {
     try {
-      await fetch(`/api/pcs/${pcId}/power`, {
+      const res = await fetch(`/api/pcs/${pcId}/power`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action })
       });
+      if (!res.ok) throw new Error('Failed');
       showToast(`Power action '${action}' sent to PC ${pcId}`);
       setSelectedPc(null);
+      setPcDetails(null);
       fetchLabs();
     } catch (e) {
       showToast('Failed to send power action');
@@ -177,12 +325,25 @@ export default function Labs() {
       {pc.status === 'online' && <div className="absolute top-0 right-0 w-12 h-12 bg-emerald-500/10 blur-xl rounded-full" />}
       {pc.status === 'issue' && <div className="absolute top-0 right-0 w-12 h-12 bg-amber-500/10 blur-xl rounded-full" />}
       
-      <Monitor className={cn(
-        "w-8 h-8 relative z-10 transition-transform group-hover:scale-110",
-        pc.status === 'online' ? "text-emerald-400" :
-        pc.status === 'issue' ? "text-amber-400" :
-        "text-slate-500"
-      )} />
+      <div className="relative">
+        <Monitor className={cn(
+          "w-8 h-8 relative z-10 transition-transform group-hover:scale-110",
+          pc.status === 'online' ? "text-emerald-400" :
+          pc.status === 'issue' ? "text-amber-400" :
+          "text-slate-500"
+        )} />
+        {(pc as any).locked && (
+          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center border-2 border-slate-900 z-20">
+            <Lock className="w-2.5 h-2.5 text-slate-900" />
+          </div>
+        )}
+        {(pc as any).exam_mode && !(pc as any).locked && (
+          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-rose-500 rounded-full flex items-center justify-center border-2 border-slate-900 z-20">
+            <ShieldAlert className="w-2.5 h-2.5 text-white" />
+          </div>
+        )}
+      </div>
+
       <div className="text-center relative z-10">
         <p className="text-sm font-bold text-slate-200">{pc.ip.split('.').pop()}</p>
         <p className={cn(
@@ -215,10 +376,43 @@ export default function Labs() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div>
           <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400 tracking-tight">Lab Rooms</h1>
-          <p className="text-slate-400 mt-2 text-lg">Monitor and manage individual PCs across all {rooms.length} labs.</p>
+          <div className="flex items-center gap-3 mt-2">
+            <p className="text-slate-400 text-lg">Monitor and manage individual PCs across all {rooms.length} labs.</p>
+            <button 
+              onClick={openSettingsModal}
+              className={cn(
+                "px-3 py-1.5 border rounded-full text-xs font-bold flex items-center gap-1.5 transition-all hover:scale-105",
+                settings.autoShutdownEnabled 
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20" 
+                  : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" /> 
+              Auto-Shutdown: {settings.autoShutdownTime} ({settings.autoShutdownEnabled ? 'ON' : 'OFF'})
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-3">
+          <button
+            onClick={toggleExamMode}
+            className={cn(
+              "flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all shadow-lg hover:-translate-y-0.5",
+              settings.examModeEnabled 
+                ? "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/20" 
+                : "bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+            )}
+          >
+            {settings.examModeEnabled ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+            {settings.examModeEnabled ? 'Exam Mode: ON' : 'Exam Mode: OFF'}
+          </button>
+          <button
+            onClick={clearAllData}
+            className="flex items-center gap-2 px-6 py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-xl font-semibold transition-all border border-rose-500/20"
+          >
+            <XCircle className="w-5 h-5" />
+            Clear All Data
+          </button>
           <button
             onClick={() => setShowBroadcastModal(true)}
             className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-slate-900/20 hover:-translate-y-0.5"
@@ -273,24 +467,64 @@ export default function Labs() {
       </div>
 
       {/* Class Schedule Banner */}
-      {selectedLab && schedules[selectedLab] && (
+      {selectedLab && (
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
         >
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-white">{schedules[selectedLab].class}</p>
-              <p className="text-xs text-indigo-300 font-medium">{schedules[selectedLab].teacher}</p>
-            </div>
-          </div>
-          <div className="px-4 py-2 bg-indigo-500/20 rounded-lg border border-indigo-500/30 text-sm font-bold text-indigo-300">
-            {schedules[selectedLab].time}
-          </div>
+          {schedules[selectedLab] ? (
+            <>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">{schedules[selectedLab].class}</p>
+                  <p className="text-xs text-indigo-300 font-medium">{schedules[selectedLab].teacher}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="px-4 py-2 bg-indigo-500/20 rounded-lg border border-indigo-500/30 text-sm font-bold text-indigo-300">
+                  {schedules[selectedLab].time}
+                </div>
+                <button 
+                  onClick={() => {
+                    setScheduleForm({
+                      class_name: schedules[selectedLab].class,
+                      teacher: schedules[selectedLab].teacher,
+                      time: schedules[selectedLab].time
+                    });
+                    setShowScheduleModal(true);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-colors border border-slate-700"
+                >
+                  Edit
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-slate-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-300">No active class schedule</p>
+                  <p className="text-xs text-slate-500 font-medium">Lab is currently available</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setScheduleForm({ class_name: '', teacher: '', time: '' });
+                  setShowScheduleModal(true);
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Add Schedule
+              </button>
+            </>
+          )}
         </motion.div>
       )}
 
@@ -301,32 +535,34 @@ export default function Labs() {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/50 rounded-3xl p-8 shadow-2xl overflow-x-auto"
+          className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/50 rounded-3xl p-4 sm:p-8 shadow-2xl overflow-hidden"
         >
           {viewMode === 'grid' ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-4">
               {labs[selectedLab].map(renderPC)}
             </div>
           ) : (
-            <div className="flex flex-col md:flex-row justify-center items-center md:items-start gap-12 md:gap-24 min-w-[800px] mx-auto p-8 bg-slate-950/30 rounded-3xl border border-slate-800/30">
-              {/* Left Side: 3x3 */}
-              <div className="flex flex-col items-center gap-6">
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Left Side (3x3)</div>
-                <div className="grid grid-cols-3 gap-6">
-                  {labs[selectedLab].slice(0, 9).map(renderPC)}
+            <div className="w-full overflow-x-auto pb-4">
+              <div className="flex flex-col md:flex-row justify-center items-center md:items-start gap-8 md:gap-16 min-w-[600px] max-w-5xl mx-auto p-4 sm:p-8 bg-slate-950/30 rounded-3xl border border-slate-800/30">
+                {/* Left Side: 3x3 */}
+                <div className="flex flex-col items-center gap-4 sm:gap-6 w-full md:w-auto">
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Left Side (3x3)</div>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 lg:gap-6 w-full md:w-auto justify-items-center">
+                    {labs[selectedLab].slice(0, 9).map(renderPC)}
+                  </div>
                 </div>
-              </div>
-              
-              {/* Aisle */}
-              <div className="hidden md:flex flex-col items-center justify-center w-8 h-full min-h-[400px] border-x border-dashed border-slate-800/50 relative">
-                <span className="text-slate-700 font-bold tracking-widest uppercase rotate-90 whitespace-nowrap text-sm absolute">Aisle</span>
-              </div>
+                
+                {/* Aisle */}
+                <div className="hidden md:flex flex-col items-center justify-center w-8 h-full min-h-[400px] border-x border-dashed border-slate-800/50 relative">
+                  <span className="text-slate-700 font-bold tracking-widest uppercase rotate-90 whitespace-nowrap text-sm absolute">Aisle</span>
+                </div>
 
-              {/* Right Side: 4x4 */}
-              <div className="flex flex-col items-center gap-6">
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Right Side (4x4)</div>
-                <div className="grid grid-cols-4 gap-6">
-                  {labs[selectedLab].slice(9, 25).map(renderPC)}
+                {/* Right Side: 4x4 */}
+                <div className="flex flex-col items-center gap-4 sm:gap-6 w-full md:w-auto">
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Right Side (4x4)</div>
+                  <div className="grid grid-cols-4 gap-2 sm:gap-4 lg:gap-6 w-full md:w-auto justify-items-center">
+                    {labs[selectedLab].slice(9, 25).map(renderPC)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -353,7 +589,13 @@ export default function Labs() {
                   <p className="text-sm text-slate-400">Room {pcDetails.room}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedPc(null)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
+              <button 
+                onClick={() => {
+                  setSelectedPc(null);
+                  setPcDetails(null);
+                }} 
+                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -408,7 +650,7 @@ export default function Labs() {
                     <span className="text-slate-400">Last Seen</span>
                     <span className="flex items-center gap-1 text-slate-300">
                       <Clock className="w-4 h-4"/> 
-                      {formatDistanceToNow(new Date(pcDetails.last_seen), { addSuffix: true })}
+                      {formatDistanceToNow(new Date(pcDetails.lastSeen || new Date()), { addSuffix: true })}
                     </span>
                   </div>
                 </div>
@@ -422,7 +664,13 @@ export default function Labs() {
                   {/* Live Screen Preview */}
                   <div className="w-full aspect-video bg-slate-950 rounded-xl border border-slate-800 overflow-hidden relative group mb-4">
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/50 transition-opacity z-20">
-                      <button onClick={() => setFullScreenPreview(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition-colors text-white rounded-lg text-sm font-bold flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setPreviewPc(pcDetails);
+                          setFullScreenPreview(true);
+                        }} 
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition-colors text-white rounded-lg text-sm font-bold flex items-center gap-2"
+                      >
                         <Camera className="w-4 h-4" /> Full Screen
                       </button>
                     </div>
@@ -466,12 +714,23 @@ export default function Labs() {
                       <Power className="w-4 h-4" /> Shutdown
                     </button>
                   </div>
-                  <button 
-                    onClick={() => setShowIssueModal(true)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-xl text-sm font-semibold transition-colors"
-                  >
-                    <AlertTriangle className="w-4 h-4" /> Report Issue
-                  </button>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <button 
+                      onClick={() => {
+                        handleAction(pcDetails.id, 'auto_fix', 'Running Auto Fixer...');
+                        showToast('Auto Fixer started: Clearing temp files & killing heavy apps.');
+                      }}
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      <Wand2 className="w-4 h-4" /> Auto Fixer
+                    </button>
+                    <button 
+                      onClick={() => setShowIssueModal(true)}
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      <AlertTriangle className="w-4 h-4" /> Report Issue
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -518,7 +777,20 @@ export default function Labs() {
                           <CheckCircle2 className="w-4 h-4 text-slate-500" />
                           <span className="text-sm text-slate-400">{sw.name}</span>
                         </div>
-                        <span className="text-xs font-mono text-slate-500">{sw.version}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-slate-500">{sw.version}</span>
+                          <button 
+                            onClick={() => {
+                              handleAction(pcDetails.id, 'block_software', sw.name);
+                              showToast(`Blocked ${sw.name} on PC ${pcDetails.id}`);
+                            }}
+                            className="flex items-center gap-1 text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-1 rounded-md transition-colors"
+                            title="Block this software"
+                          >
+                            <Ban className="w-3 h-3" />
+                            Block
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -529,6 +801,178 @@ export default function Labs() {
         </div>
       </div>
     )}
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+          >
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Settings className="w-5 h-5 text-indigo-400" />
+                System Settings
+              </h2>
+              <button onClick={() => setShowSettingsModal(false)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">Auto-Shutdown Configuration</h3>
+                <div className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-xl mb-4">
+                  <div>
+                    <p className="text-white font-medium">Enable Auto-Shutdown</p>
+                    <p className="text-xs text-slate-400 mt-1">Automatically turn off all PCs at a specific time.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={tempSettings.autoShutdownEnabled}
+                      onChange={(e) => setTempSettings({ ...tempSettings, autoShutdownEnabled: e.target.checked })}
+                    />
+                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+                
+                <div className={cn("transition-opacity", !tempSettings.autoShutdownEnabled && "opacity-50 pointer-events-none")}>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Shutdown Time</label>
+                  <input 
+                    type="time" 
+                    value={tempSettings.autoShutdownTime}
+                    onChange={(e) => setTempSettings({ ...tempSettings, autoShutdownTime: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">Email Alerts</h3>
+                <div className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-xl mb-4">
+                  <div>
+                    <p className="text-white font-medium">Enable Email Alerts</p>
+                    <p className="text-xs text-slate-400 mt-1">Receive email notifications for new PC issues.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={tempSettings.emailEnabled}
+                      onChange={(e) => setTempSettings({ ...tempSettings, emailEnabled: e.target.checked })}
+                    />
+                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+                
+                <div className={cn("space-y-4 transition-opacity", !tempSettings.emailEnabled && "opacity-50 pointer-events-none")}>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">SMTP Host</label>
+                      <input 
+                        type="text" 
+                        placeholder="smtp.gmail.com"
+                        value={tempSettings.emailSmtpHost}
+                        onChange={(e) => setTempSettings({ ...tempSettings, emailSmtpHost: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">SMTP Port</label>
+                      <input 
+                        type="number" 
+                        placeholder="587"
+                        value={tempSettings.emailSmtpPort}
+                        onChange={(e) => setTempSettings({ ...tempSettings, emailSmtpPort: parseInt(e.target.value) || 587 })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">SMTP Username (Email)</label>
+                    <input 
+                      type="email" 
+                      placeholder="your-email@gmail.com"
+                      value={tempSettings.emailUser}
+                      onChange={(e) => setTempSettings({ ...tempSettings, emailUser: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">SMTP Password / App Password</label>
+                    <input 
+                      type="password" 
+                      placeholder="••••••••••••"
+                      value={tempSettings.emailPass}
+                      onChange={(e) => setTempSettings({ ...tempSettings, emailPass: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Recipient Email</label>
+                    <input 
+                      type="email" 
+                      placeholder="admin@example.com"
+                      value={tempSettings.emailTo}
+                      onChange={(e) => setTempSettings({ ...tempSettings, emailTo: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3 border-t border-slate-800">
+                <button 
+                  onClick={() => setShowSettingsModal(false)}
+                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => updateSettings(tempSettings)}
+                  className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Confirm Dialog Modal */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6"
+          >
+            <div className="flex items-center gap-3 mb-4 text-amber-500">
+              <AlertTriangle className="w-6 h-6" />
+              <h2 className="text-xl font-bold text-white">Confirm Action</h2>
+            </div>
+            <p className="text-slate-300 mb-8">{confirmDialog.message}</p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmDialog.onConfirm}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Broadcast Modal */}
       {showBroadcastModal && (
@@ -543,7 +987,7 @@ export default function Labs() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <form onSubmit={handleBroadcast} className="p-6 space-y-4">
               <p className="text-sm text-slate-400">
                 Send a pop-up message to <strong>ALL</strong> PCs across all labs.
               </p>
@@ -554,18 +998,20 @@ export default function Labs() {
                   onChange={(e) => setBroadcastMsg(e.target.value)}
                   placeholder="e.g., Class is ending in 5 minutes. Please save your work."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 min-h-[100px] resize-none"
+                  required
                 />
               </div>
 
               <div className="pt-4 flex gap-3">
                 <button 
+                  type="button"
                   onClick={() => setShowBroadcastModal(false)}
                   className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button 
-                  onClick={() => handleAction('ALL', 'broadcast', broadcastMsg)}
+                  type="submit"
                   disabled={!broadcastMsg.trim()}
                   className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
                 >
@@ -573,7 +1019,7 @@ export default function Labs() {
                   Send Broadcast
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
@@ -676,56 +1122,163 @@ export default function Labs() {
 
       {/* Full Screen Preview Modal */}
       <AnimatePresence>
-        {fullScreenPreview && pcDetails && (
+        {fullScreenPreview && previewPc && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8 z-[60]"
+            className="fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 z-[70]"
           >
-            <div className="w-full h-full max-w-6xl relative flex flex-col">
-              <div className="flex justify-between items-center mb-4 shrink-0">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Monitor className="w-5 h-5 text-indigo-400" />
-                  Live Preview: PC {pcDetails.ip.split('.').pop()} (Lab {pcDetails.room})
-                </h2>
+            <div className="w-full h-full max-w-7xl relative flex flex-col">
+              <div className="flex justify-between items-center mb-6 shrink-0">
+                <div className="flex flex-col">
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                    <Monitor className="w-6 h-6 text-indigo-400" />
+                    Live Preview: PC {previewPc.ip.split('.').pop()}
+                    <span className="flex items-center gap-1.5 px-2 py-0.5 bg-rose-500/20 text-rose-500 rounded-md text-xs font-black animate-pulse border border-rose-500/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                      LIVE
+                    </span>
+                  </h2>
+                  <p className="text-slate-400 text-sm font-medium mt-1">Lab {previewPc.room} • {previewPc.ip} • Uptime: 4h 12m</p>
+                </div>
                 <button 
-                  onClick={() => setFullScreenPreview(false)} 
-                  className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors"
+                  onClick={() => {
+                    setFullScreenPreview(false);
+                    setPreviewPc(null);
+                  }} 
+                  className="p-3 hover:bg-slate-800 rounded-2xl text-slate-400 transition-all hover:scale-110 active:scale-90"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="w-8 h-8" />
                 </button>
               </div>
               
-              <div className="flex-1 border border-slate-800 rounded-2xl bg-slate-900 relative overflow-hidden flex flex-col">
+              <div className="flex-1 border border-slate-800 rounded-3xl bg-slate-950 relative overflow-hidden shadow-2xl flex flex-col">
                 {/* Fake code editor screen */}
-                <div className="h-8 bg-slate-800 flex items-center px-4 gap-2 shrink-0">
+                <div className="h-10 bg-slate-900 flex items-center px-6 gap-2 shrink-0 border-b border-slate-800">
                   <div className="w-3 h-3 rounded-full bg-rose-500"></div>
                   <div className="w-3 h-3 rounded-full bg-amber-500"></div>
                   <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                  <div className="ml-4 text-xs text-slate-400 font-mono">App.tsx - Visual Studio Code</div>
+                  <div className="ml-6 text-xs text-slate-500 font-mono flex items-center gap-2">
+                    <Code2 className="w-3 h-3" />
+                    App.tsx - Visual Studio Code
+                  </div>
                 </div>
-                <div className="p-6 text-sm sm:text-base font-mono text-emerald-400/80 flex-1 overflow-auto">
+                <div className="p-8 text-base sm:text-lg font-mono text-emerald-400/90 flex-1 overflow-auto bg-[#0d1117]">
                   <p><span className="text-pink-400">import</span> React <span className="text-pink-400">from</span> <span className="text-amber-300">'react'</span>;</p>
+                  <p className="mt-2 text-slate-500">// Remote session active</p>
                   <p className="mt-2"><span className="text-pink-400">function</span> <span className="text-blue-400">App</span>() {'{'}</p>
-                  <p className="pl-4 mt-1"><span className="text-pink-400">return</span> (</p>
-                  <p className="pl-8">&lt;<span className="text-blue-400">div</span> <span className="text-indigo-300">className</span>=<span className="text-amber-300">"min-h-screen bg-slate-900 text-white flex items-center justify-center"</span>&gt;</p>
-                  <p className="pl-12">&lt;<span className="text-blue-400">h1</span> <span className="text-indigo-300">className</span>=<span className="text-amber-300">"text-4xl font-bold"</span>&gt;Hello World&lt;/<span className="text-blue-400">h1</span>&gt;</p>
-                  <p className="pl-8">&lt;/<span className="text-blue-400">div</span>&gt;</p>
-                  <p className="pl-4">);</p>
+                  <p className="pl-6 mt-1"><span className="text-pink-400">return</span> (</p>
+                  <p className="pl-10">&lt;<span className="text-blue-400">div</span> <span className="text-indigo-300">className</span>=<span className="text-amber-300">"min-h-screen bg-slate-900"</span>&gt;</p>
+                  <p className="pl-14">&lt;<span className="text-blue-400">h1</span>&gt;Lab Monitoring System&lt;/<span className="text-blue-400">h1</span>&gt;</p>
+                  <p className="pl-10">&lt;/<span className="text-blue-400">div</span>&gt;</p>
+                  <p className="pl-6">);</p>
                   <p>{'}'}</p>
                   <p className="mt-4"><span className="text-pink-400">export default</span> App;</p>
-                  <p className="mt-8 text-slate-500">// System running normally</p>
-                  <p className="text-slate-500">// CPU: {pcDetails.cpu_usage}% | RAM: {pcDetails.ram_usage}%</p>
-                  <div className="w-2 h-4 bg-emerald-400/80 animate-pulse mt-2 inline-block"></div>
+                  
+                  <div className="mt-12 space-y-2 border-t border-slate-800 pt-6">
+                    <p className="text-slate-500 text-sm">// System Diagnostics</p>
+                    <p className="text-slate-400 text-sm">CPU: {previewPc.cpu_usage}% | RAM: {previewPc.ram_usage}% | Disk: {previewPc.disk_usage}%</p>
+                    <p className="text-slate-400 text-sm">Network: 12.4 Mbps ↓ | 4.2 Mbps ↑</p>
+                    <p className="text-slate-400 text-sm">Temperature: 42°C</p>
+                  </div>
+                  <div className="w-2 h-5 bg-emerald-400/80 animate-pulse mt-4 inline-block"></div>
                 </div>
                 {/* Scanline effect */}
-                <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px] pointer-events-none opacity-20"></div>
+                <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.1)_50%)] bg-[length:100%_4px] pointer-events-none opacity-30"></div>
+                
+                {/* Overlay status */}
+                <div className="absolute bottom-6 right-6 flex items-center gap-4">
+                  <div className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 text-xs font-mono text-white flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                      SECURE
+                    </div>
+                    <div className="w-px h-3 bg-white/20"></div>
+                    1080p @ 60fps
+                  </div>
+                </div>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Schedule Modal */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-indigo-400" />
+                Manage Schedule (Room {selectedLab})
+              </h2>
+              <button onClick={() => setShowScheduleModal(false)} className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveSchedule} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Class Name</label>
+                <input 
+                  type="text" 
+                  value={scheduleForm.class_name}
+                  onChange={(e) => setScheduleForm({...scheduleForm, class_name: e.target.value})}
+                  placeholder="e.g., CSE 321 - Software Engineering"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Teacher</label>
+                <input 
+                  type="text" 
+                  value={scheduleForm.teacher}
+                  onChange={(e) => setScheduleForm({...scheduleForm, teacher: e.target.value})}
+                  placeholder="e.g., Dr. Smith"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Time</label>
+                <input 
+                  type="text" 
+                  value={scheduleForm.time}
+                  onChange={(e) => setScheduleForm({...scheduleForm, time: e.target.value})}
+                  placeholder="e.g., 10:00 AM - 11:30 AM"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+              <div className="pt-4 flex gap-3">
+                {schedules[selectedLab] && (
+                  <button 
+                    type="button"
+                    onClick={handleDeleteSchedule}
+                    className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl font-medium transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+                <button 
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

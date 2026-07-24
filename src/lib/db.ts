@@ -46,10 +46,29 @@ db.exec(`
     status TEXT DEFAULT 'pending', -- 'pending' | 'completed' | 'failed'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS schedules (
+    room TEXT PRIMARY KEY,
+    class_name TEXT NOT NULL,
+    teacher TEXT NOT NULL,
+    time TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Seed initial data if empty (10 Labs, 25 PCs each)
 const count = db.prepare('SELECT COUNT(*) as c FROM pcs').get() as { c: number };
+const scheduleCount = db.prepare('SELECT COUNT(*) as c FROM schedules').get() as { c: number };
+
+if (scheduleCount.c === 0) {
+  const insertSchedule = db.prepare('INSERT INTO schedules (room, class_name, teacher, time) VALUES (?, ?, ?, ?)');
+  db.transaction(() => {
+    insertSchedule.run('801', 'CSE 321 - Software Engineering', 'Dr. Smith', '10:00 AM - 11:30 AM');
+    insertSchedule.run('802', 'CSE 411 - Computer Networks', 'Prof. Johnson', '11:30 AM - 01:00 PM');
+    insertSchedule.run('803', 'CSE 211 - Data Structures', 'Mr. Davis', '09:00 AM - 10:30 AM');
+    insertSchedule.run('804', 'CSE 311 - Database Systems', 'Dr. Wilson', '02:00 PM - 03:30 PM');
+  })();
+}
 
 if (count.c === 0) {
   console.log('Seeding initial lab data...');

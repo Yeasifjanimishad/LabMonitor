@@ -25,9 +25,9 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [statsData, labsRaw, issuesData] = await Promise.all([
+      const [statsData, allPcs, issuesData] = await Promise.all([
         fetch('/api/stats').then(res => res.json()),
-        fetch('/api/labs').then(res => res.json()),
+        fetch('/api/pcs').then(res => res.json()),
         fetch('/api/issues').then(res => res.json())
       ]);
       
@@ -35,8 +35,14 @@ export default function Dashboard() {
       setRecentIssues(issuesData.filter((i: any) => i.status === 'open').slice(0, 5));
       
       // Process labs data for the chart
-      const chartData = Object.keys(labsRaw).map(room => {
-        const pcs: PC[] = labsRaw[room];
+      const grouped = allPcs.reduce((acc: any, pc: any) => {
+        if (!acc[pc.room]) acc[pc.room] = [];
+        acc[pc.room].push(pc);
+        return acc;
+      }, {});
+
+      const chartData = Object.keys(grouped).map(room => {
+        const pcs: PC[] = grouped[room];
         const onlinePcs = pcs.filter(pc => pc.status === 'online');
         const avgCpu = onlinePcs.length ? Math.round(onlinePcs.reduce((acc, pc) => acc + (pc.cpu_usage || 0), 0) / onlinePcs.length) : 0;
         const avgRam = onlinePcs.length ? Math.round(onlinePcs.reduce((acc, pc) => acc + (pc.ram_usage || 0), 0) / onlinePcs.length) : 0;
@@ -53,7 +59,6 @@ export default function Dashboard() {
       setLabsData(chartData);
       
       // Store raw PCs for the modal
-      const allPcs = Object.values(labsRaw).flat() as PC[];
       setRawPcs(allPcs);
     } catch (error) {
       console.error("Failed to fetch dashboard data", error);
@@ -64,6 +69,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleResolve = async (pcId: string) => {

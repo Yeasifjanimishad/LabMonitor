@@ -154,7 +154,15 @@ while ($true) {
         </h3>
         <ol className="list-decimal list-inside space-y-3 text-slate-300 text-base leading-relaxed">
           <li>Copy the script above using the button.</li>
-          <li>Change the <code className="text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md font-mono text-sm">YOUR_SERVER_IP</code> to the IP address where this dashboard is hosted.</li>
+          <li>
+            Change the <code className="text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md font-mono text-sm">YOUR_SERVER_IP</code> to the IP address of this computer.
+            <div className="mt-2 ml-6 p-3 bg-slate-950/50 rounded-xl border border-slate-800 text-sm">
+              <p className="text-indigo-400 font-bold mb-1">How to find your IP:</p>
+              <p>1. Press <kbd className="bg-slate-800 px-1 rounded">Win + R</kbd>, type <code className="text-emerald-400">cmd</code> and press Enter.</p>
+              <p>2. In the black window, type <code className="text-emerald-400">ipconfig</code> and press Enter.</p>
+              <p>3. Look for the number next to <span className="text-white font-bold">IPv4 Address</span> (e.g., 192.168.x.x). That is your IP.</p>
+            </div>
+          </li>
           <li>Change the <code className="text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md font-mono text-sm">$roomNumber</code> to the correct lab room (e.g., "809").</li>
           <li>Save it as <code className="text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md font-mono text-sm">agent.ps1</code> on the lab PC.</li>
           <li>Run it using PowerShell as Administrator. You can set it up in Windows Task Scheduler to run automatically on startup.</li>

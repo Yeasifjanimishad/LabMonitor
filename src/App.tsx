@@ -5,12 +5,14 @@ import Labs from './pages/Labs';
 import AgentSetup from './pages/AgentSetup';
 import Login from './pages/Login';
 import Tasks from './pages/Tasks';
-import Issues from './pages/Issues';
+import Tickets from './pages/Tickets';
 import About from './pages/About';
+import TeacherDashboard from './pages/TeacherDashboard';
+import StudentDashboard from './pages/StudentDashboard';
 
 function App() {
-  // Simple mock auth for demonstration
-  const isAuthenticated = localStorage.getItem('adminAuth') === 'true';
+  const userRole = localStorage.getItem('userRole');
+  const isAuthenticated = !!userRole;
 
   return (
     <BrowserRouter>
@@ -19,11 +21,22 @@ function App() {
         
         {/* Protected Routes */}
         <Route path="/" element={isAuthenticated ? <Layout /> : <Navigate to="/login" />}>
-          <Route index element={<Dashboard />} />
-          <Route path="labs" element={<Labs />} />
-          <Route path="issues" element={<Issues />} />
-          <Route path="tasks" element={<Tasks />} />
-          <Route path="agent" element={<AgentSetup />} />
+          <Route index element={
+            userRole === 'admin' ? <Dashboard /> :
+            userRole === 'teacher' ? <TeacherDashboard /> :
+            <StudentDashboard />
+          } />
+          
+          {/* Admin Only Routes */}
+          {userRole === 'admin' && (
+            <>
+              <Route path="labs" element={<Labs />} />
+              <Route path="tickets" element={<Tickets />} />
+              <Route path="tasks" element={<Tasks />} />
+              <Route path="agent" element={<AgentSetup />} />
+            </>
+          )}
+          
           <Route path="about" element={<About />} />
         </Route>
       </Routes>
