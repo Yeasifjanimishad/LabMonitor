@@ -1,107 +1,78 @@
 # LabMonitor Pro - Centralized University Lab Monitoring System
 
-LabMonitor Pro (ল্যাবমনিটর প্রো) একটি সেন্ট্রালাইজড কম্পিউটার ল্যাব মনিটরিং ও ম্যানেজমেন্ট প্ল্যাটফর্ম। এর মাধ্যমে বিশ্ববিদ্যালয় বা প্রতিষ্ঠানের ল্যাবের সকল পিসির অনলাইন স্ট্যাটাস, ইন্টারনেটের উপস্থিতি, সিপিইউ/র‌্যাম/ডিস্ক ইউসেজ, ইনস্টল করা সফটওয়্যার ট্র্যাক এবং রিমোট পাওয়ার কন্ট্রোল করা যায়।
+LabMonitor Pro is a centralized university computer laboratory monitoring and management web platform. Designed for academic environments, it enables real-time hardware performance tracking, automated agent polling, screen locking, exam mode enforcement, and remote power actions across multiple lab workstations.
 
 ---
 
-## 🚀 প্রধান বৈশিষ্ট্যসমূহ (Key Features)
+## 🚀 Key Features
 
-* **মাল্টি-রোল অ্যাক্সেস (Multi-Role Support):**
-  * **Admin Panel:** একাধিক রুম/ল্যাব তৈরি ও কনফিগারেশন, রুম রিসেট এবং সফটওয়্যার ম্যানেজমেন্ট।
-  * **Teacher Dashboard:** নির্দিষ্ট ল্যাব রুম সিলেক্ট করে প্রতিটি পিসির রিয়েল-টাইম মনিটরিং, এক্সাম মোড, লক স্ক্রিন এবং এক ক্লিকে **Wake All** বা **Shutdown All**।
-  * **Student Dashboard:** প্রতিটি পিসির নিজস্ব স্ট্যাটাস ড্যাশবোর্ড। পিসি অফ থাকলে **Powered Off** সংকেত প্রদর্শন।
-* **রিমোট পাওয়ার একশন (Power Actions):**
-  * ইন্ডিভিজুয়াল ও সম্পূর্ণ ল্যাব রুমের পিসি **Shutdown** এবং **Wake (Power On)** করার সুবিধা।
-* **এজেন্ট স্ক্রিপ্ট ব্যাকগ্রাউন্ড সার্ভিস:**
-  * স্টুডেন্ট পিসিতে হালকা PowerShell স্ক্রিপ্ট রান করে রিয়েল-টাইম সিস্টেম ইনফরমেশন সার্ভারে পাঠানো হয়।
-* **স্টেবল ডেমো ডেটা:**
-  * ডেমো পিসিগুলোর স্ট্যাটাস কনসিস্টেন্ট রাখার জন্য ইন-মেমোরি রেজিলিয়েন্ট ডেটা স্ট্রাকচার।
+* **Multi-Role Access & Dashboards:**
+  * **Admin Panel:** Global system overview, room configuration, schedule management, ticket resolving, and demo state management.
+  * **Teacher Dashboard:** Real-time grid view of all workstations in a selected lab, one-click screen locking, exam mode toggle, broadcast messages, file collection/sharing, and bulk power management (**Wake All** / **Shutdown All**).
+  * **Student Station:** Station-specific status view, help request triggers, assignment file submissions, shared file downloads, and automated "Powered Off" or "Screen Locked" overlays.
 
----
+* **Remote Power Management:**
+  * Individual and room-wide **Power On (Wake-on-LAN)** and **Shutdown** actions to conserve energy and manage lab operations.
 
-## 🛠️ পূর্বশর্ত (Prerequisites)
+* **Real-time Hardware & Software Telemetry:**
+  * Live monitoring of CPU utilization, RAM usage, Disk space, network connectivity, and installed application inventories via lightweight background agent pings.
 
-1. **Node.js**: নিশ্চিত করুন যে আপনার কম্পিউটারে Node.js (v18 বা পরবর্তী) ইনস্টল করা আছে।
-   * ডাউনলোড লিঙ্ক: [https://nodejs.org/](https://nodejs.org/)
-   * যাচাই করতে টার্মিনালে চালান: `node -v`
+* **Lightweight Client Agent (`agent.ps1`):**
+  * Standalone PowerShell background script for Windows workstations—no Node.js runtime required on client PCs.
 
 ---
 
-## 💻 কীভাবে অ্যাপ্লিকেশনটি রান করবেন (How to Run)
+## 🛠️ Tech Stack
 
-###Step 1: ডিপেনডেন্সি ইনস্টল করুন
-প্রজেক্ট ফোল্ডারে টার্মিনাল বা PowerShell খুলে নিচের কমান্ডটি দিন:
+* **Frontend:** React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Motion (Framer Motion), Recharts.
+* **Backend:** Express.js, Vite Middleware, Node.js.
+* **Client Agent:** Windows PowerShell (`Invoke-RestMethod`, WMI/CIM).
+
+---
+
+## 💻 Installation & Setup
+
+### Prerequisites
+* **Node.js**: v18.x or higher installed on the main server PC ([Download Node.js](https://nodejs.org/)).
+
+### Step 1: Install Dependencies
 ```bash
 npm install
 ```
 
-### Step 2: ডেভেলপমেন্ট সার্ভার চালনা করুন
+### Step 2: Start Development Server
 ```bash
 npm run dev
 ```
 
-### Step 3: ব্রাউজারে অ্যাপ খুলুন
-সার্ভার চালু হলে ব্রাউজারে ভিজিট করুন:
+### Step 3: Access Application
+Open your browser and navigate to:
 ```http
 http://localhost:3000
 ```
 
 ---
 
-## 🔑 লগইন রোলসমূহ (Login Roles)
+## 🔑 Login Credentials (Demo Roles)
 
-লগইন পেজ থেকে ভূমিকা সিলেক্ট করে সরাসরি ড্যাশবোর্ডে প্রবেশ করতে পারবেন:
-
-| Role (ভূমিকা) | ডেসক্রিপশন |
-|---|---|
-| **Admin** | পুরো ল্যাব সিস্টেম, রুম ম্যানেজমেন্ট, ডাটা রিসেট ও গ্লোবাল মনিটরিং। |
-| **Teacher** | নির্দিষ্ট রুম বেছে নিয়ে (যেমন: Room 809) লাইভ পিসি মনিটরিং ও কন্ট্রোল। |
-| **Student** | নির্দিষ্ট ল্যাব পিসির ড্যাশবোর্ডভিউ। |
+| Role | Default Access / Password | Capabilities |
+|---|---|---|
+| **Admin** | Password: `admin123` | System settings, room setup, ticketing, global controls. |
+| **Teacher** | Password: `teacher123` (Select Room) | Active lab monitoring, screen lock, exam mode, file sharing. |
+| **Student** | Select PC Station | Station view, ask for help, submit assignments. |
 
 ---
 
-## 🖥️ স্টুডেন্ট পিসিতে কীভাবে যুক্ত করবেন? (Student PC Agent Setup)
+## 🖥️ Workstation Agent Deployment (`agent.ps1`)
 
-> **প্রশ্ন:** স্টুডেন্ট পিসিতে কি পুরো ওয়েব অ্যাপ ফাইল লাগবে?  
-> **উত্তর:** **না**, স্টুডেন্ট পিসিতে কোন নোড বা পুরো ওয়েব অ্যাপ লাগবে না। শুধু একটি হালকা **PowerShell script (`agent.ps1`)** ব্যাকগ্রাউন্ডে রান করালেই হবে।
+Student PCs do **not** require the web application files or Node.js. Only the lightweight PowerShell agent script is required.
 
-### এজেন্ট সেটআপের ধাপসমূহ:
-
-1. **সার্ভার পিসির IP বের করুন:**
-   - মূল সার্ভার পিসিতে `Win + R` চেপে `cmd` টাইপ করে Enter দিন।
-   - `ipconfig` লিখে Enter দিন এবং `IPv4 Address` টি নোট করুন (যেমন: `192.168.1.100`)।
-
-2. **PowerShell Script সংগ্রহ:**
-   - ওয়েব অ্যাপের **Agent Setup** মেনু থেকে `agent.ps1` স্ক্রিপ্ট কপি করুন।
-   - স্ক্রিপ্টের উপরের অংশে আপনার সার্ভার IP ও রুম নম্বর বসান:
-     ```powershell
-     $serverUrl = "http://192.168.1.100:3000/api/agent/ping"
-     $roomNumber = "809"
-     ```
-
-3. **স্টুডেন্ট পিসিতে রান করুন:**
-   - স্টুডেন্ট পিসিতে ফাইলটি `agent.ps1` নামে সেভ করুন।
-   - **PowerShell as Administrator** চালু করে স্ক্রিপ্টটি রান করুন।
-   - স্ক্রিপ্টটি প্রতি ৫ মিনিট পর পর অটোমেটিক সার্ভারে পিসির মেট্রিক্স (CPU, RAM, Disk, Internet, Installed Apps) আপডেট পাঠাবে।
+1. Obtain the Server IP address using `ipconfig` on the host machine.
+2. Navigate to the **Agent Setup** tab in the web platform.
+3. Update `$serverUrl` in `agent.ps1` with the server IP address (e.g., `http://192.168.1.100:3000/api/agent/ping`).
+4. Execute `agent.ps1` with Administrator privileges on client workstations.
 
 ---
 
-## 📁 প্রজেক্ট আর্কিটেকচার (Architecture)
-
-* **`server.ts`**: Express REST API ব্যাকএন্ড। ইন-মেমোরি ডেমো স্টেট ও এজেন্ট পিং রিসিভ করার কাজ করে।
-* **`src/pages/TeacherDashboard.tsx`**: টিচার কন্ট্রোল প্যানেল (Power controls, Exam mode, Lock screen, PC Grid view)।
-* **`src/pages/StudentDashboard.tsx`**: স্টুডেন্ট স্ক্রিন ও অফলাইন পিসি নোটিফিকেশন।
-* **`src/pages/Labs.tsx`**: রুম ভিত্তিক ল্যাব তথ্য ও ডেমো ডাটা রিসেট অপশন।
-* **`src/pages/AgentSetup.tsx`**: এজেন্ট স্ক্রিপ্ট জেনারেটর ও গাইডলাইন।
-
----
-
-## ❓ সমস্যা ও সমাধান (Troubleshooting)
-
-- **লিঙ্ক খুলছে না বা Localhost কানেক্ট হচ্ছে না?**  
-  নিশ্চিত করুন `npm run dev` রানিং আছে এবং ব্রাউজারে `http://localhost:3000` ব্যবহার করছেন।
-- **ডাটা রিসেট করতে চাইলে?**  
-  Admin বা Labs ড্যাশবোর্ড থেকে **Clear All Data** বাটনে ক্লিক করলে সিস্টেমের মূল ডেমো স্টেট পুনরায় লোড হবে।
-
----
-Developed for University Computer Lab Monitoring & Remote Management.
+## 📄 License
+Distributed under the MIT License. See `LICENSE` for more information.
