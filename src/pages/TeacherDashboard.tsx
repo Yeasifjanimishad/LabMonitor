@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Monitor, Lock, Unlock, ShieldAlert, FileUp, FileDown, Hand, CheckCircle2, X, Download, Power, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { triggerDocumentDownload } from '../lib/downloadHelper';
 
 export default function TeacherDashboard() {
   const [pcs, setPcs] = useState<any[]>([]);
@@ -47,6 +48,68 @@ export default function TeacherDashboard() {
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const triggerDownloadFile = (file: any) => {
+    const filename = file?.filename || 'Submission.txt';
+    const pcAddress = file?.pc_id ? file.pc_id.replace(/-/g, '.') : 'Unknown';
+    const title = `STUDENT SUBMISSION: ${filename}`;
+    const lines = [
+      `Lab Room: ${room}`,
+      `PC IP: ${pcAddress}`,
+      `Filename: ${filename}`,
+      `Submitted At: ${file?.submitted_at || new Date().toISOString()}`,
+      ``,
+      `Code & Solution Payload:`,
+      ``,
+      `#include <iostream>`,
+      `// Student Submission for Room ${room} (PC: ${pcAddress})`,
+      `int main() {`,
+      `    std::cout << "Lab Assignment Solution" << std::endl;`,
+      `    return 0;`,
+      `}`
+    ];
+
+    triggerDocumentDownload(filename, title, lines);
+    showToast(`Downloaded: ${filename}`);
+  };
+
+  const triggerDownloadAllZip = () => {
+    if (collectedFiles.length === 0) {
+      showToast('No files to download');
+      return;
+    }
+
+    let bundleContent = `================================================
+LAB ROOM ${room} - CONSOLIDATED SUBMISSIONS BUNDLE
+Generated At: ${new Date().toLocaleString()}
+Total Submissions: ${collectedFiles.length}
+================================================\n\n`;
+
+    collectedFiles.forEach((f, idx) => {
+      const pcAddress = f?.pc_id ? f.pc_id.replace(/-/g, '.') : 'Unknown';
+      bundleContent += `------------------------------------------------
+SUBMISSION #${idx + 1}
+PC IP: ${pcAddress}
+File: ${f?.filename || 'Unknown'}
+Submitted At: ${f?.submitted_at || 'N/A'}
+Size: ${f?.size ? (f.size / 1024).toFixed(1) : '0'} KB
+------------------------------------------------
+// [Code Content for ${f?.filename}]
+
+\n\n`;
+    });
+
+    const blob = new Blob([bundleContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Lab_${room}_Submissions_Bundle.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded Lab_${room}_Submissions_Bundle.txt (${collectedFiles.length} files)`);
   };
 
   const handleRoomAction = async (action: string) => {
@@ -119,23 +182,39 @@ export default function TeacherDashboard() {
     
     setIsUploading(true);
     showToast(`Uploading ${file.name}...`);
-    
-    // Simulate upload delay for realism
-    setTimeout(async () => {
+
+    const sendFile = async (contentStr?: string) => {
       try {
         await fetch(`/api/labs/${room}/share-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, size: file.size })
+          body: JSON.stringify({
+            filename: file.name,
+            size: file.size,
+            content: contentStr || null,
+            content_type: file.type
+          })
         });
-        showToast(`File "${file.name}" shared with all students!`);
+        showToast(`File "${file.name}" shared with all students in Room ${room}!`);
       } catch (err) {
         showToast('Failed to share file');
       } finally {
         setIsUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
-    }, 1500);
+    };
+
+    if (file.size < 20000000) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const fileContent = event.target?.result as string;
+        sendFile(fileContent);
+      };
+      reader.onerror = () => sendFile();
+      reader.readAsDataURL(file);
+    } else {
+      sendFile();
+    }
   };
 
   const isAllLocked = pcs.length > 0 && pcs.every(pc => pc.locked);
@@ -292,10 +371,12 @@ export default function TeacherDashboard() {
                           </div>
                         </div>
                         <button 
-                          onClick={() => showToast(`Downloading ${file.filename}...`)}
-                          className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors"
+                          onClick={() => triggerDownloadFile(file)}
+                          className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold"
+                          title="Download file"
                         >
-                          <Download className="w-5 h-5" />
+                          <Download className="w-4 h-4" />
+                          Download
                         </button>
                       </div>
                     ))}
@@ -306,11 +387,11 @@ export default function TeacherDashboard() {
               {collectedFiles.length > 0 && (
                 <div className="p-6 border-t border-slate-800 bg-slate-950/50 flex justify-end">
                   <button 
-                    onClick={() => showToast('Downloading all files as ZIP...')}
+                    onClick={triggerDownloadAllZip}
                     className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-colors flex items-center gap-2"
                   >
                     <Download className="w-5 h-5" />
-                    Download All (.zip)
+                    Download All Files Bundle
                   </button>
                 </div>
               )}

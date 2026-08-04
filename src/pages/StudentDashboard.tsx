@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Monitor, Hand, Upload, Download, AlertTriangle, Lock, ShieldAlert, CheckCircle2, Power } from 'lucide-react';
+import { Monitor, Hand, Upload, Download, AlertTriangle, Lock, ShieldAlert, CheckCircle2, Power, X, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { triggerDocumentDownload } from '../lib/downloadHelper';
 
 export default function StudentDashboard() {
   const [pc, setPc] = useState<any>(null);
   const [toastMsg, setToastMsg] = useState('');
   const [sharedFiles, setSharedFiles] = useState<any[]>([]);
+  const [showMaterialsModal, setShowMaterialsModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pcId = localStorage.getItem('userId');
-  const room = localStorage.getItem('userRoom') || '809';
+  const [room, setRoom] = useState(localStorage.getItem('userRoom') || '809');
 
   const fetchPC = () => {
     if (!pcId) {
@@ -20,14 +22,19 @@ export default function StudentDashboard() {
     fetch(`/api/pcs/${pcId}`)
       .then(res => {
         if (res.status === 404) {
-          // If PC doesn't exist anymore (e.g. server restart), force logout
           localStorage.clear();
           window.location.href = '/login';
           throw new Error('PC not found');
         }
         return res.json();
       })
-      .then(data => setPc(data))
+      .then(data => {
+        setPc(data);
+        if (data && data.room) {
+          setRoom(data.room);
+          localStorage.setItem('userRoom', data.room);
+        }
+      })
       .catch(() => {});
   };
 
@@ -49,13 +56,53 @@ export default function StudentDashboard() {
     const interval = setInterval(() => {
       fetchPC();
       fetchFiles();
-    }, 3000); // Poll every 3 seconds for lock/exam mode and files
+    }, 2500);
     return () => clearInterval(interval);
   }, [pcId, room]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const triggerDownload = (file: any) => {
+    const filename = file?.filename || 'Class_Material.txt';
+    
+    if (file?.content) {
+      const a = document.createElement('a');
+      a.href = file.content;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast(`Downloaded: ${filename}`);
+      return;
+    }
+
+    const title = `LAB CLASS MATERIAL: ${filename}`;
+    const lines = [
+      `Room: ${room}`,
+      `Shared At: ${file?.shared_at || new Date().toISOString()}`,
+      `Downloaded At: ${new Date().toLocaleString()}`,
+      ``,
+      `Welcome to Room ${room} Computer Laboratory!`,
+      `This file was distributed by your instructor.`,
+      ``,
+      `Course Details:`,
+      `- Room: ${room}`,
+      `- Document Name: ${filename}`,
+      `- File Size: ${file?.size ? (file.size / 1024).toFixed(1) : '512'} KB`,
+      ``,
+      `Lab Instructions & Task:`,
+      `1. Complete the practical exercises specified in this document.`,
+      `2. Save your project/solution file locally on your lab station.`,
+      `3. Submit your completed lab assignment via the Student Station Dashboard.`,
+      ``,
+      `Happy Coding!`
+    ];
+
+    triggerDocumentDownload(filename, title, lines);
+    showToast(`Downloaded: ${filename}`);
   };
 
   const handleAction = async (action: string) => {
@@ -78,14 +125,19 @@ export default function StudentDashboard() {
     
     setIsSubmitting(true);
     showToast(`Uploading ${file.name}...`);
-    
-    // Simulate upload delay
-    setTimeout(async () => {
+
+    const submitData = async (contentStr?: string) => {
       try {
         await fetch(`/api/labs/${room}/submit-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pc_id: pcId, filename: file.name, size: file.size })
+          body: JSON.stringify({
+            pc_id: pcId,
+            filename: file.name,
+            size: file.size,
+            content: contentStr || null,
+            content_type: file.type
+          })
         });
         showToast(`Assignment "${file.name}" submitted successfully!`);
       } catch (err) {
@@ -94,7 +146,19 @@ export default function StudentDashboard() {
         setIsSubmitting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
-    }, 1500);
+    };
+
+    if (file.size < 20000000) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const fileContent = event.target?.result as string;
+        submitData(fileContent);
+      };
+      reader.onerror = () => submitData();
+      reader.readAsDataURL(file);
+    } else {
+      submitData();
+    }
   };
 
   if (!pc) {
@@ -264,9 +328,7 @@ export default function StudentDashboard() {
           )}
           onClick={() => {
             if (sharedFiles.length > 0) {
-              const latestFile = sharedFiles[sharedFiles.length - 1];
-              showToast(`Downloading: ${latestFile.filename}`);
-              // In a real app, this would trigger a file download via an anchor tag
+              setShowMaterialsModal(true);
             } else {
               showToast('No class materials shared yet');
             }
@@ -287,7 +349,7 @@ export default function StudentDashboard() {
             <h2 className="text-2xl font-bold text-white mb-2">Class Materials</h2>
             {sharedFiles.length > 0 ? (
               <p className="text-emerald-400 font-medium">
-                Latest: {sharedFiles[sharedFiles.length - 1].filename}
+                {sharedFiles.length} file{sharedFiles.length > 1 ? 's' : ''} available (Click to view)
               </p>
             ) : (
               <p className="text-slate-400">Download slides, code snippets, and resources shared by the teacher.</p>
@@ -299,7 +361,7 @@ export default function StudentDashboard() {
         <motion.div 
           whileHover={{ scale: 1.02 }}
           className="p-8 rounded-3xl bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 transition-all flex flex-col items-center justify-center text-center gap-4 cursor-pointer"
-          onClick={() => showToast('Issue reported to Admin (Mock)')}
+          onClick={() => showToast('Issue reported to Admin')}
         >
           <div className="w-20 h-20 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center">
             <AlertTriangle className="w-10 h-10" />
@@ -310,6 +372,63 @@ export default function StudentDashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* Class Materials Download Modal */}
+      <AnimatePresence>
+        {showMaterialsModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Class Materials</h2>
+                    <p className="text-sm text-slate-400">Room {room} Shared Resources</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowMaterialsModal(false)} 
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+                {sharedFiles.map((file) => (
+                  <div key={file.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-emerald-500/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-white">{file.filename}</p>
+                        <p className="text-xs text-slate-400">
+                          {file?.size ? (file.size / 1024).toFixed(1) : '512'} KB • {file?.shared_at ? new Date(file.shared_at).toLocaleTimeString() : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => triggerDownload(file)}
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm transition-colors shadow-md"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

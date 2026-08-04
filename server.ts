@@ -10,7 +10,8 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(bodyParser.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Generate 10 labs with 25 PCs each
   const generateMockData = () => {
@@ -211,7 +212,7 @@ async function startServer() {
   // File Sharing API
   app.post('/api/labs/:room/share-file', (req, res) => {
     const { room } = req.params;
-    const { filename, size } = req.body;
+    const { filename, size, content, content_type } = req.body;
     
     if (!sharedFiles[room]) {
       sharedFiles[room] = [];
@@ -221,6 +222,8 @@ async function startServer() {
       id: Date.now().toString(),
       filename,
       size,
+      content: content || null,
+      content_type: content_type || null,
       shared_at: new Date().toISOString()
     };
     
@@ -230,13 +233,21 @@ async function startServer() {
 
   app.get('/api/labs/:room/files', (req, res) => {
     const { room } = req.params;
-    res.json(sharedFiles[room] || []);
+    const roomFiles = sharedFiles[room] || [];
+    const globalFiles = sharedFiles['ALL'] || [];
+    const combined = [...roomFiles];
+    globalFiles.forEach(gf => {
+      if (!combined.some(rf => rf.id === gf.id)) {
+        combined.push(gf);
+      }
+    });
+    res.json(combined);
   });
 
   // File Collection API (Student to Teacher)
   app.post('/api/labs/:room/submit-file', (req, res) => {
     const { room } = req.params;
-    const { pc_id, filename, size } = req.body;
+    const { pc_id, filename, size, content, content_type } = req.body;
     
     if (!collectedFiles[room]) {
       collectedFiles[room] = [];
@@ -247,6 +258,8 @@ async function startServer() {
       pc_id,
       filename,
       size,
+      content: content || null,
+      content_type: content_type || null,
       submitted_at: new Date().toISOString()
     };
     

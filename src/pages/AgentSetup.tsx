@@ -1,9 +1,10 @@
-import { Terminal, Copy, CheckCircle2, Server, Code2 } from 'lucide-react';
+import { Terminal, Copy, CheckCircle2, Server, Code2, Download } from 'lucide-react';
 import { useState } from 'react';
 import { motion } from 'motion/react';
 
 export default function AgentSetup() {
   const [copied, setCopied] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
 
   // The PowerShell script that students/admins will run on the lab PCs
   const scriptContent = `# LabMonitor Pro - Windows Agent
@@ -94,6 +95,20 @@ while ($true) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const downloadScript = () => {
+    const blob = new Blob([scriptContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'agent.ps1';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setDownloaded(true);
+    setTimeout(() => setDownloaded(false), 2000);
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -126,13 +141,22 @@ while ($true) {
             </div>
             agent.ps1
           </div>
-          <button
-            onClick={copyToClipboard}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95"
-          >
-            {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Copied!' : 'Copy Script'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copyToClipboard}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95"
+            >
+              {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copied ? 'Copied!' : 'Copy Script'}
+            </button>
+            <button
+              onClick={downloadScript}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95"
+            >
+              {downloaded ? <CheckCircle2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+              {downloaded ? 'Downloaded!' : 'Download agent.ps1'}
+            </button>
+          </div>
         </div>
         <div className="p-6 overflow-x-auto bg-[#0d1117]">
           <pre className="text-sm font-mono text-emerald-400 leading-relaxed">
