@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Activity, MonitorOff, WifiOff, AlertTriangle, MonitorPlay, CheckCircle2, Server, HardDrive, Cpu, Clock, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
+import { Activity, MonitorOff, WifiOff, AlertTriangle, MonitorPlay, CheckCircle2, Server, HardDrive, Cpu, Clock, X, ArrowRight, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { cn } from '../lib/utils';
@@ -16,12 +18,14 @@ type PC = {
 type ListFilter = 'all' | 'online' | 'offline' | 'issue' | null;
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({ total: 0, online: 0, offline: 0, issues: 0 });
   const [labsData, setLabsData] = useState<any[]>([]);
   const [rawPcs, setRawPcs] = useState<PC[]>([]);
   const [recentIssues, setRecentIssues] = useState<any[]>([]);
   const [listFilter, setListFilter] = useState<ListFilter>(null);
   const [loading, setLoading] = useState(true);
+  const [toastMsg, setToastMsg] = useState('');
 
   const fetchData = async () => {
     try {
@@ -73,13 +77,26 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 3500);
+  };
+
   const handleResolve = async (pcId: string) => {
     try {
+      // Optimistic update
+      setRawPcs(prev => prev.map(p => p.id === pcId ? { ...p, status: 'online' } : p));
+      setStats(prev => ({
+        ...prev,
+        online: prev.online + 1,
+        issues: Math.max(0, prev.issues - 1)
+      }));
+      showToast(`PC ${pcId.replace(/-/g, '.')} issue marked as resolved!`);
       await fetch(`/api/pcs/${pcId}/resolve`, { method: 'POST' });
-      // Refresh data after resolving
       fetchData();
     } catch (error) {
-      console.error("Failed to resolve issue", error);
+      showToast('Failed to resolve issue');
+      fetchData();
     }
   };
 
@@ -136,8 +153,10 @@ export default function Dashboard() {
       bg: 'bg-rose-500/10', 
       border: 'border-rose-500/20', 
       shadow: 'shadow-rose-500/10',
+      ringColor: 'hover:ring-rose-500/50',
       onClick: () => setListFilter('issue'),
-      interactive: true
+      interactive: true,
+      hasTicketsLink: true
     },
   ];
 
@@ -170,8 +189,22 @@ export default function Dashboard() {
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="space-y-8 pb-8"
+      className="space-y-8 pb-8 relative"
     >
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-6 right-6 bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-2xl shadow-indigo-500/20 z-50 font-medium flex items-center gap-2"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            {toastMsg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div variants={itemVariants} className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-900/40 via-slate-900 to-slate-900 border border-indigo-500/20 p-8 sm:p-10">
         <div className="absolute top-0 right-0 -mt-16 -mr-16 w-64 h-64 bg-indigo-500/20 blur-3xl rounded-full pointer-events-none" />
         <div className="absolute bottom-0 left-0 -mb-16 -ml-16 w-48 h-48 bg-emerald-500/10 blur-3xl rounded-full pointer-events-none" />
@@ -192,7 +225,13 @@ export default function Dashboard() {
             key={i} 
             whileHover={{ y: -4, scale: 1.02 }}
             onClick={card.onClick}
-            className={`relative overflow-hidden bg-slate-900/80 backdrop-blur-xl border ${card.border} rounded-2xl p-6 flex flex-col gap-4 shadow-lg ${card.shadow} transition-all duration-300 ${card.interactive ? 'cursor-pointer hover:ring-2 hover:ring-rose-500/50' : ''}`}
+            className={cn(
+              "relative overflow-hidden bg-slate-900/80 backdrop-blur-xl border rounded-2xl p-6 flex flex-col justify-between gap-4 shadow-lg transition-all duration-300",
+              card.border,
+              card.shadow,
+              card.interactive ? "cursor-pointer hover:ring-2" : "",
+              card.ringColor || "hover:ring-indigo-500/50"
+            )}
           >
             <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/5 blur-2xl rounded-full pointer-events-none" />
             <div className="flex items-center justify-between">
@@ -201,9 +240,27 @@ export default function Dashboard() {
               </div>
               <span className="text-4xl font-black text-white tracking-tighter">{card.value}</span>
             </div>
-            <p className="text-sm font-semibold text-slate-400 uppercase tracking-wider">{card.title}</p>
+            <div>
+              <p className="text-sm font-semibold text-slate-400 uppercase tracking-wider">{card.title}</p>
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
+                <span className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 font-medium">
+                  Click to inspect <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+                {card.hasTicketsLink && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate('/tickets');
+                    }}
+                    className="text-xs text-rose-400 hover:text-rose-300 font-bold bg-rose-500/10 hover:bg-rose-500/20 px-2 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                  >
+                    Tickets <ExternalLink className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
             {card.interactive && (
-              <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rose-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
             )}
           </motion.div>
         ))}
@@ -272,9 +329,9 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <motion.div variants={itemVariants} className="space-y-6">
-          <div className="bg-gradient-to-br from-amber-900/20 to-slate-900 border border-amber-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full pointer-events-none" />
+        <motion.div variants={itemVariants} className="bg-gradient-to-br from-amber-900/20 to-slate-900 border border-amber-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 blur-3xl rounded-full pointer-events-none" />
+          <div>
             <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
               <WifiOff className="w-5 h-5 text-amber-400" />
               Connectivity Alerts
@@ -284,6 +341,8 @@ export default function Dashboard() {
                 ? `There are currently ${stats.issues} PCs experiencing network or hardware issues. Immediate attention may be required.` 
                 : 'All online PCs currently have stable internet connectivity. No active alerts.'}
             </p>
+          </div>
+          <div>
             <div className="w-full bg-slate-950/50 rounded-full h-2 mb-2 overflow-hidden">
               <div 
                 className="bg-amber-400 h-2 rounded-full transition-all duration-1000" 
@@ -295,9 +354,11 @@ export default function Dashboard() {
               <span>{stats.total > 0 ? ((stats.issues / stats.total) * 100).toFixed(1) : 0}%</span>
             </div>
           </div>
+        </motion.div>
 
-          <div className="bg-gradient-to-br from-rose-900/20 to-slate-900 border border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 blur-3xl rounded-full pointer-events-none" />
+        <motion.div variants={itemVariants} className="bg-gradient-to-br from-rose-900/20 to-slate-900 border border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 blur-3xl rounded-full pointer-events-none" />
+          <div>
             <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-rose-400" />
               Maintenance Required
@@ -307,21 +368,23 @@ export default function Dashboard() {
                 ? `${stats.offline} PCs are currently offline and unreachable. They may be powered down or disconnected from the network.` 
                 : 'All monitored PCs are currently online and responding to pings.'}
             </p>
-            <div className="mt-6 flex items-center gap-4 text-sm font-medium text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-slate-500" />
-                <span>Last updated just now</span>
-              </div>
+          </div>
+          <div className="mt-6 flex items-center gap-4 text-sm font-medium text-slate-400">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-slate-500" />
+              <span>Auto-refresh active (every 5s)</span>
             </div>
           </div>
+        </motion.div>
 
-          <div className="bg-gradient-to-br from-indigo-900/20 to-slate-900 border border-indigo-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none" />
+        <motion.div variants={itemVariants} className="bg-gradient-to-br from-indigo-900/20 to-slate-900 border border-indigo-500/20 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden flex flex-col justify-between">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none" />
+          <div>
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-indigo-400" />
               Recent Open Issues
             </h3>
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
               {recentIssues.length === 0 ? (
                 <p className="text-sm text-slate-400">No open issues at the moment.</p>
               ) : (
@@ -340,94 +403,126 @@ export default function Dashboard() {
         </motion.div>
       </div>
 
-      {/* Dynamic List Modal */}
-      <AnimatePresence>
-        {listFilter && currentModalInfo && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-          >
+      {/* Dynamic List Modal rendered via Portal to escape all stacking contexts */}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {listFilter && currentModalInfo && (
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 z-[9999]"
+              onClick={() => setListFilter(null)}
             >
-              <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/50 shrink-0">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <currentModalInfo.icon className={`w-5 h-5 ${currentModalInfo.color}`} />
-                  {currentModalInfo.title} ({filteredPcs.length})
-                </h2>
-                <button 
-                  onClick={() => setListFilter(null)} 
-                  className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6 overflow-y-auto flex-1">
-                <div className="space-y-4">
-                  {filteredPcs.length === 0 ? (
-                    <div className="text-center py-12">
-                      <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <CheckCircle2 className="w-8 h-8 text-slate-400" />
-                      </div>
-                      <p className="text-slate-300 font-medium text-lg">No PCs found</p>
-                      <p className="text-slate-500 mt-1">There are no PCs matching this status.</p>
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+              >
+                <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/70 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", currentModalInfo.color === 'text-rose-400' ? 'bg-rose-500/10' : 'bg-slate-800')}>
+                      <currentModalInfo.icon className={`w-5 h-5 ${currentModalInfo.color}`} />
                     </div>
-                  ) : (
-                    filteredPcs.map(pc => (
-                      <motion.div 
-                        layout
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: 20 }}
-                        key={pc.id} 
-                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-800/30 border border-slate-700/50 hover:bg-slate-800/50 p-4 rounded-2xl transition-colors"
+                    <div>
+                      <h2 className="text-xl font-bold text-white">
+                        {currentModalInfo.title} ({filteredPcs.length})
+                      </h2>
+                      <p className="text-xs text-slate-400">Click an action below to resolve or inspect details</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {listFilter === 'issue' && (
+                      <button
+                        onClick={() => {
+                          setListFilter(null);
+                          navigate('/tickets');
+                        }}
+                        className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
                       >
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "w-8 h-8 rounded-lg flex items-center justify-center",
-                              pc.status === 'online' ? "bg-emerald-500/10" :
-                              pc.status === 'issue' ? "bg-rose-500/10" :
-                              "bg-slate-500/10"
-                            )}>
-                              <MonitorPlay className={cn(
-                                "w-4 h-4",
-                                pc.status === 'online' ? "text-emerald-400" :
-                                pc.status === 'issue' ? "text-rose-400" :
-                                "text-slate-400"
-                              )} />
-                            </div>
-                            <span className="font-bold text-slate-200">PC {pc.ip.split('.').pop()}</span>
-                            <span className="text-xs font-bold text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-md">Lab {pc.room}</span>
-                          </div>
-                          <p className="text-sm text-slate-400 mt-2 ml-11">
-                            Status: <span className="capitalize">{pc.status}</span>
-                            {pc.status === 'issue' && ' (Needs attention)'}
-                          </p>
-                        </div>
-                        {pc.status === 'issue' && (
-                          <button
-                            onClick={() => handleResolve(pc.id)}
-                            className="px-4 py-2.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 sm:w-auto w-full"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            Mark Resolved
-                          </button>
-                        )}
-                      </motion.div>
-                    ))
-                  )}
+                        All Tickets <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => setListFilter(null)} 
+                      className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
+                <div className="p-6 overflow-y-auto flex-1">
+                  <div className="space-y-4">
+                    {filteredPcs.length === 0 ? (
+                      <div className="text-center py-12">
+                        <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <CheckCircle2 className="w-8 h-8 text-slate-400" />
+                        </div>
+                        <p className="text-slate-300 font-medium text-lg">No PCs found</p>
+                        <p className="text-slate-500 mt-1">There are no computers currently matching this status.</p>
+                      </div>
+                    ) : (
+                      filteredPcs.map(pc => {
+                        const pcIssue = recentIssues.find(iss => iss.pc_id === pc.id || iss.pc_id === pc.ip.replace(/\./g, '-'));
+                        return (
+                          <motion.div 
+                            layout
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            key={pc.id} 
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-800/40 border border-slate-700/50 hover:bg-slate-800/70 p-4 rounded-2xl transition-colors"
+                          >
+                            <div>
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "w-8 h-8 rounded-lg flex items-center justify-center",
+                                  pc.status === 'online' ? "bg-emerald-500/10" :
+                                  pc.status === 'issue' ? "bg-rose-500/10" :
+                                  "bg-slate-500/10"
+                                )}>
+                                  <MonitorPlay className={cn(
+                                    "w-4 h-4",
+                                    pc.status === 'online' ? "text-emerald-400" :
+                                    pc.status === 'issue' ? "text-rose-400" :
+                                    "text-slate-400"
+                                  )} />
+                                </div>
+                                <span className="font-bold text-slate-200">PC {pc.ip.split('.').pop()} ({pc.ip})</span>
+                                <span className="text-xs font-bold text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-md">Lab {pc.room}</span>
+                              </div>
+                              <p className="text-sm text-slate-400 mt-2 ml-11">
+                                Status: <span className={cn("capitalize font-semibold", pc.status === 'issue' ? 'text-rose-400' : pc.status === 'online' ? 'text-emerald-400' : 'text-slate-400')}>{pc.status}</span>
+                                {pc.status === 'issue' && (
+                                  <span className="text-rose-300 ml-1">
+                                    — {pcIssue?.description || 'Hardware alert or connectivity issue'}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                            {pc.status === 'issue' && (
+                              <button
+                                onClick={() => handleResolve(pc.id)}
+                                className="px-4 py-2.5 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 hover:text-white rounded-xl text-sm font-bold transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-2 sm:w-auto w-full shadow-lg"
+                              >
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                Mark Resolved
+                              </button>
+                            )}
+                          </motion.div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </motion.div>
   );
 }

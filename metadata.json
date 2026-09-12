@@ -1,5 +1,6 @@
 {
   "name": "LabMonitor Pro",
   "description": "A centralized dashboard to monitor university lab PCs, tracking online status, internet connectivity, and installed software.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

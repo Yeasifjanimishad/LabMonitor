@@ -28,6 +28,8 @@ export default function Layout() {
     { to: '/about', icon: Info, label: 'About' },
   ] : userRole === 'teacher' ? [
     { to: '/', icon: LayoutDashboard, label: 'My Lab' },
+    { to: '/agent', icon: Terminal, label: 'Agent Setup' },
+    { to: '/tickets', icon: ShieldAlert, label: 'Tickets' },
     { to: '/about', icon: Info, label: 'About' },
   ] : [
     { to: '/', icon: LayoutDashboard, label: 'My Station' },

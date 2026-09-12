@@ -5,7 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { cn } from '../lib/utils';
 
 type Issue = {
-  id: number;
+  id: string | number;
   pc_id: string;
   description: string;
   status: 'open' | 'resolved';
@@ -20,6 +20,8 @@ export default function Tickets() {
 
   useEffect(() => {
     fetchIssues();
+    const interval = setInterval(fetchIssues, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const showToast = (msg: string) => {
@@ -34,7 +36,7 @@ export default function Tickets() {
       .catch(err => console.error(err));
   };
 
-  const handleResolve = async (id: number) => {
+  const handleResolve = async (id: string | number) => {
     try {
       await fetch(`/api/issues/${id}/resolve`, { method: 'POST' });
       showToast('Issue resolved successfully');

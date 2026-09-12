@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldAlert, Lock, ArrowRight, User, GraduationCap, Monitor, ChevronDown } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ShieldAlert, Lock, ArrowRight, User, GraduationCap, Monitor, ChevronDown, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -237,6 +237,16 @@ export default function Login() {
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </motion.button>
           </form>
+
+          <div className="mt-6 pt-5 border-t border-slate-800/60 flex items-center justify-center">
+            <Link 
+              to="/agent"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-indigo-400 transition-colors"
+            >
+              <Terminal className="w-4 h-4 text-indigo-500" />
+              Setting up student PCs? Open Agent Setup &rarr;
+            </Link>
+          </div>
         </div>
       </motion.div>
     </div>
