@@ -14,7 +14,7 @@ export default function AgentSetup() {
     
   const [serverUrl, setServerUrl] = useState(defaultUrl);
   const [roomNumber, setRoomNumber] = useState('809');
-  const [pollInterval, setPollInterval] = useState('200');
+  const [pollInterval, setPollInterval] = useState('3');
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
 
@@ -208,14 +208,25 @@ export default function AgentSetup() {
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">Heartbeat Interval (Sec)</label>
             <input 
               type="number"
-              min="5"
-              max="600"
+              min="1"
+              max="60"
               value={pollInterval}
               onChange={(e) => setPollInterval(e.target.value)}
               className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
             />
-            <p className="text-[11px] text-slate-500">
-              Heartbeat Interval configured: 200s (Default: 200s / 3.3 minutes).
+            <p className="text-[11px] text-emerald-400 font-medium">
+              Default: 3 seconds for instant exam mode lockdown and lock responsiveness.
+            </p>
+          </div>
+        </div>
+
+        {/* Updated Version Notice */}
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-sm text-amber-200">Already have an older agent running on the Student PC?</p>
+            <p className="mt-1 text-slate-300 leading-relaxed">
+              Close the running PowerShell window on the student machine (or run the updated <strong>Download 1-Click .BAT</strong>). The updated agent automatically kills previous background instances, resolves live IP addresses for Windows Defender Firewall block rules, forces Chrome & Edge to disable DoH and load URLBlocklist, and scans active sockets every 500ms to instantly terminate any ChatGPT or AI access.
             </p>
           </div>
         </div>
@@ -316,7 +327,7 @@ export default function AgentSetup() {
             </div>
             <div className="px-4 py-2 bg-slate-900/90 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-300 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-500" />
-              AI Tools & Browsers: Minimized
+              Exam Mode: AI & Google Search Blocked
             </div>
             <div className="px-4 py-2 bg-slate-900/90 border border-slate-700/80 rounded-xl text-xs font-medium text-slate-300 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-indigo-500" />

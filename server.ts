@@ -159,7 +159,7 @@ async function startServer() {
   };
 
   // API to serve the raw agent.ps1 script directly for curl/irm execution
-  const buildAgentScript = (fullServerUrl: string, roomNumber: string, intervalSeconds: string | number = 200) => {
+  const buildAgentScript = (fullServerUrl: string, roomNumber: string, intervalSeconds: string | number = 3) => {
     return `# =========================================================
 # LabMonitor Pro - Real-Time Autonomous Windows Lab Agent
 # Total Workstation Lockdown & Hardware Freeze Engine
@@ -213,12 +213,286 @@ public class Win32Lock {
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }
 "@
 }
 
+try {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+} catch {}
+
 $global:LockProcess = $null
 $global:IsLocked = $false
+$global:ExamModeActive = $false
+$global:StationIp = ""
+$global:ExamBlockedIps = @()
+
+# Exam Mode AI & Search Engine Host Domain Blocklist
+$global:ExamBlockedDomains = @(
+    "chatgpt.com", "www.chatgpt.com", "chat.openai.com", "api.openai.com", "openai.com", "platform.openai.com",
+    "oaistatic.com", "cdn.oaistatic.com", "oaiusercontent.com", "auth0.openai.com",
+    "claude.ai", "www.claude.ai", "anthropic.com", "api.anthropic.com",
+    "gemini.google.com", "bard.google.com", "generativelanguage.googleapis.com",
+    "copilot.microsoft.com", "edgeservices.bing.com", "sydney.bing.com",
+    "perplexity.ai", "www.perplexity.ai",
+    "deepseek.com", "www.deepseek.com", "chat.deepseek.com", "api.deepseek.com",
+    "poe.com", "www.poe.com",
+    "character.ai", "www.character.ai",
+    "huggingface.co", "chat.huggingface.co",
+    "mistral.ai", "chat.mistral.ai",
+    "blackbox.ai", "www.blackbox.ai",
+    "google.com", "www.google.com", "google.com.bd", "www.google.com.bd", "encrypted.google.com",
+    "bing.com", "www.bing.com",
+    "duckduckgo.com", "www.duckduckgo.com",
+    "yahoo.com", "search.yahoo.com",
+    "yandex.com", "www.yandex.com",
+    "baidu.com", "www.baidu.com"
+)
+
+function Check-ExamWatchdog {
+    if (-not $global:ExamModeActive) { return }
+
+    $aiRegex = "(ChatGPT|OpenAI|Claude|Gemini|Copilot|Perplexity|DeepSeek|Google Search|\\bGoogle\\b|duckduckgo|bing\\.com|chat\\.openai\\.com|chatgpt\\.com|blackbox\\.ai|poe\\.com)"
+
+    # 1. Terminate any dedicated desktop AI apps
+    try {
+        Get-Process -Name "chatgpt", "claude", "copilot", "perplexity", "deepseek" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    } catch {}
+
+    # 2. Window Title Scan: terminate any window or tab accessing prohibited AI or Search
+    try {
+        $violatingProcs = Get-Process | Where-Object { 
+            $_.MainWindowTitle -and ($_.MainWindowTitle -match $aiRegex) 
+        }
+
+        foreach ($p in $violatingProcs) {
+            $title = $p.MainWindowTitle
+            $procName = $p.ProcessName.ToLower()
+            Write-Host " [!] EXAM VIOLATION INTERCEPTED: $procName ('$title')" -ForegroundColor Red
+            
+            # Sound hardware alarm
+            try { [System.Console]::Beep(1500, 300) } catch {}
+
+            # Immediately kill the violating browser process/window
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+
+            # Report violation directly to Teacher Dashboard
+            try {
+                $targetId = if ($global:StationIp) { $global:StationIp.Replace('.', '-') } else { 'unknown' }
+                $violationPayload = @{
+                    message = "Exam Violation: Student opened '$title' ($procName) - Process terminated by Exam Watchdog!"
+                } | ConvertTo-Json
+                $vioUrl = $serverUrl.Replace("/agent/ping", "/pcs/$targetId/violation")
+                Invoke-RestMethod -Uri $vioUrl -Method Post -Body $violationPayload -ContentType "application/json" -TimeoutSec 2 -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    } catch {}
+
+    # 3. Active TCP Connection Scan: Detect connection to AI IPs at socket layer
+    try {
+        if ($global:ExamBlockedIps -and $global:ExamBlockedIps.Count -gt 0) {
+            $activeConns = Get-NetTCPConnection -State Established, SynSent -ErrorAction SilentlyContinue | Where-Object {
+                $global:ExamBlockedIps -contains $_.RemoteAddress
+            }
+            foreach ($conn in $activeConns) {
+                if ($conn.OwningProcess -gt 4) {
+                    Write-Host " [!] Active TCP socket to prohibited AI IP ($($conn.RemoteAddress)) on PID $($conn.OwningProcess) - Terminating..." -ForegroundColor Red
+                    try { [System.Console]::Beep(1800, 300) } catch {}
+                    Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } catch {}
+}
+
+function Enable-ExamMode {
+    if ($global:ExamModeActive) { return }
+    $global:ExamModeActive = $true
+    Write-Host "==================================================" -ForegroundColor Red
+    Write-Host " [!] ACTIVATING EXAM MODE: HARD-BLOCKING AI & SEARCH" -ForegroundColor Red
+    Write-Host "==================================================" -ForegroundColor Red
+
+    # 1. Resolve REAL external IP addresses of AI providers using external DNS servers (1.1.1.1 & 8.8.8.8) BEFORE modifying hosts file!
+    $realAiIps = @()
+    $dnsTargets = @(
+        "chatgpt.com", "chat.openai.com", "api.openai.com", "cdn.oaistatic.com", "oaistatic.com", "oaiusercontent.com",
+        "claude.ai", "api.anthropic.com", "gemini.google.com", "deepseek.com", "perplexity.ai"
+    )
+    foreach ($target in $dnsTargets) {
+        try {
+            $resolved = Resolve-DnsName -Name $target -Server 1.1.1.1 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress } | Select-Object -ExpandProperty IPAddress
+            if ($resolved) { $realAiIps += $resolved }
+        } catch {}
+        try {
+            $resolved2 = Resolve-DnsName -Name $target -Server 8.8.8.8 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress } | Select-Object -ExpandProperty IPAddress
+            if ($resolved2) { $realAiIps += $resolved2 }
+        } catch {}
+    }
+    $global:ExamBlockedIps = $realAiIps | Select-Object -Unique
+
+    # 2. Windows Defender Firewall Outbound Block Rule (Blocks packets at network kernel)
+    try {
+        Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -ErrorAction SilentlyContinue | Out-Null
+        if ($global:ExamBlockedIps -and $global:ExamBlockedIps.Count -gt 0) {
+            New-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -Direction Outbound -Action Block -RemoteAddress $global:ExamBlockedIps -Enabled True -Profile Any -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "[OK] Windows Firewall kernel block rule active on $($global:ExamBlockedIps.Count) AI IPs." -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "[!] Firewall rule notice: $_" -ForegroundColor DarkYellow
+    }
+
+    # 3. Browser Enterprise Policy: Enforce URLBlocklist & DISABLE DNS-over-HTTPS (Chrome & Edge)
+    try {
+        $blockRules = @(
+            "*chatgpt.com*",
+            "*openai.com*",
+            "*claude.ai*",
+            "*anthropic.com*",
+            "*gemini.google.com*",
+            "*bard.google.com*",
+            "*copilot.microsoft.com*",
+            "*perplexity.ai*",
+            "*deepseek.com*",
+            "*poe.com*",
+            "*blackbox.ai*",
+            "*google.com*",
+            "*bing.com*",
+            "*duckduckgo.com*"
+        )
+
+        $policyPaths = @(
+            "HKLM:\\SOFTWARE\\Policies\\Google\\Chrome",
+            "HKCU:\\Software\\Policies\\Google\\Chrome",
+            "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge",
+            "HKCU:\\Software\\Policies\\Microsoft\\Edge"
+        )
+
+        foreach ($basePath in $policyPaths) {
+            try {
+                if (-not (Test-Path $basePath)) { New-Item -Path $basePath -Force -ErrorAction SilentlyContinue | Out-Null }
+                # Force browser to use OS DNS (so hosts file works) & disable DoH
+                Set-ItemProperty -Path $basePath -Name "DnsOverHttpsMode" -Value "off" -Force -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $basePath -Name "BuiltInDnsClientEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+
+                $urlListPath = "$basePath\\URLBlocklist"
+                if (-not (Test-Path $urlListPath)) { New-Item -Path $urlListPath -Force -ErrorAction SilentlyContinue | Out-Null }
+
+                $i = 1
+                foreach ($rule in $blockRules) {
+                    Set-ItemProperty -Path $urlListPath -Name "$i" -Value $rule -Force -ErrorAction SilentlyContinue
+                    $i++
+                }
+            } catch {}
+        }
+        Write-Host "[OK] Browser URLBlocklist enterprise policy enforced." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error configuring browser policies: $_" -ForegroundColor DarkYellow
+    }
+
+    # 4. Windows hosts file redirect to 127.0.0.1
+    try {
+        $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
+        $hostsBackup = "$env:SystemRoot\\System32\\drivers\\etc\\hosts.exam.bak"
+        if (-not (Test-Path $hostsBackup)) {
+            Copy-Item -Path $hostsPath -Destination $hostsBackup -Force -ErrorAction SilentlyContinue
+        }
+
+        $existingContent = Get-Content -Path $hostsPath -Raw -ErrorAction SilentlyContinue
+        $sb = [System.Text.StringBuilder]::new()
+        $sb.AppendLine($existingContent.TrimEnd())
+        $sb.AppendLine("\`r\`n# --- LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST START ---")
+        foreach ($domain in $global:ExamBlockedDomains) {
+            $sb.AppendLine("127.0.0.1 $domain")
+            $sb.AppendLine("::1 $domain")
+        }
+        $sb.AppendLine("# --- LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST END ---")
+
+        [System.IO.File]::WriteAllText($hostsPath, $sb.ToString(), [System.Text.Encoding]::ASCII)
+        ipconfig /flushdns | Out-Null
+        Clear-DnsClientCache -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "[OK] Hosts blocklist activated & DNS flushed." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error applying hosts blocklist: $_" -ForegroundColor DarkRed
+    }
+
+    # 5. Restart Browsers so enterprise registry policies and DNS changes load immediately
+    try {
+        Write-Host "-> Restarting browsers so new Enterprise URLBlocklist policies load immediately..." -ForegroundColor Yellow
+        Get-Process -Name chrome, msedge, firefox, opera, brave -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    } catch {}
+
+    # 6. Show Notification to Student
+    try {
+        Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command ""Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Exam Mode is now ACTIVE on this workstation.\`n\`nAI Tools (ChatGPT, Claude, Gemini, DeepSeek, Copilot) and Search Engines (Google, Bing) have been blocked by the Administrator.\`n\`nAny attempt to access AI tools will sound an alarm and report a violation to the Instructor.', 'Lab Administrator - Exam Mode Active', 'OK', 'Warning')"""
+    } catch {}
+
+    Write-Host "[OK] Workstation is in EXAM LOCKDOWN. AI & Google access blocked." -ForegroundColor Green
+}
+
+function Disable-ExamMode {
+    if (-not $global:ExamModeActive) { return }
+    $global:ExamModeActive = $false
+    Write-Host "==================================================" -ForegroundColor Green
+    Write-Host " [OK] DEACTIVATING EXAM MODE: RESTORING ACCESS" -ForegroundColor Green
+    Write-Host "==================================================" -ForegroundColor Green
+
+    # 1. Clean Browser URLBlocklist policies
+    $policyPaths = @(
+        "HKLM:\\SOFTWARE\\Policies\\Google\\Chrome",
+        "HKCU:\\Software\\Policies\\Google\\Chrome",
+        "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge",
+        "HKCU:\\Software\\Policies\\Microsoft\\Edge"
+    )
+    foreach ($basePath in $policyPaths) {
+        try {
+            Remove-Item -Path "$basePath\\URLBlocklist" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $basePath -Name "DnsOverHttpsMode" -Force -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $basePath -Name "BuiltInDnsClientEnabled" -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    # 2. Remove Windows Firewall rules
+    try {
+        Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -ErrorAction SilentlyContinue | Out-Null
+    } catch {}
+
+    # 3. Restore original hosts file
+    try {
+        $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
+        $hostsBackup = "$env:SystemRoot\\System32\\drivers\\etc\\hosts.exam.bak"
+
+        if (Test-Path $hostsBackup) {
+            Copy-Item -Path $hostsBackup -Destination $hostsPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $hostsBackup -Force -ErrorAction SilentlyContinue
+        } else {
+            $content = Get-Content -Path $hostsPath -ErrorAction SilentlyContinue
+            $filtered = @()
+            $skip = $false
+            foreach ($line in $content) {
+                if ($line -like "*LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST START*") { $skip = $true; continue }
+                if ($line -like "*LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST END*") { $skip = $false; continue }
+                if (-not $skip) { $filtered += $line }
+            }
+            [System.IO.File]::WriteAllLines($hostsPath, $filtered, [System.Text.Encoding]::ASCII)
+        }
+
+        ipconfig /flushdns | Out-Null
+        Clear-DnsClientCache -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "[OK] Hosts blocklist removed & DNS cache flushed." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error restoring hosts file: $_" -ForegroundColor DarkRed
+    }
+
+    # 4. Show notification to student
+    try {
+        Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command ""Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Exam Mode has been concluded.\`n\`nStandard Internet & AI access is now restored.', 'Lab Administrator - Exam Concluded', 'OK', 'Information')"""
+    } catch {}
+
+    Write-Host "[OK] Station access fully restored." -ForegroundColor Green
+}
 
 function Start-LockOverlay {
     param([string]$Room, [string]$StationIp)
@@ -455,6 +729,7 @@ while ($true) {
         if (-not $ip) {
             $ip = "192.168.1." + (Get-Random -Minimum 10 -Maximum 99)
         }
+        $global:StationIp = $ip
 
         $cpu = Get-WmiObject Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average
         $os = Get-WmiObject Win32_OperatingSystem -ErrorAction SilentlyContinue
@@ -498,6 +773,17 @@ while ($true) {
             }
         }
 
+        # Enforce server-authoritative Exam Mode state immediately (Block AI & Search Engines)
+        if ($response -and $response.exam_mode -eq $true) {
+            if (-not $global:ExamModeActive) {
+                Enable-ExamMode
+            }
+        } elseif ($response -and $response.exam_mode -eq $false) {
+            if ($global:ExamModeActive) {
+                Disable-ExamMode
+            }
+        }
+
         if ($response -and $response.tasks) {
             foreach ($task in $response.tasks) {
                 Write-Host "-> Received command: $($task.action)" -ForegroundColor Magenta
@@ -531,11 +817,13 @@ while ($true) {
                     Invoke-RestMethod -Uri $completeUrl -Method Post -ErrorAction SilentlyContinue
                 }
                 elseif ($task.action -eq "enable_exam_mode") {
-                    Write-Host "Exam Mode activated" -ForegroundColor Red
+                    Write-Host "Exam Mode activated: Blocking AI & Search engines..." -ForegroundColor Red
+                    Enable-ExamMode
                     Invoke-RestMethod -Uri $completeUrl -Method Post -ErrorAction SilentlyContinue
                 }
                 elseif ($task.action -eq "disable_exam_mode") {
-                    Write-Host "Exam Mode deactivated" -ForegroundColor Green
+                    Write-Host "Exam Mode deactivated: Restoring AI & Search engines..." -ForegroundColor Green
+                    Disable-ExamMode
                     Invoke-RestMethod -Uri $completeUrl -Method Post -ErrorAction SilentlyContinue
                 }
                 else {
@@ -547,10 +835,15 @@ while ($true) {
         Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] Server connection error: $_" -ForegroundColor DarkRed
     }
 
-    # Heartbeat interval sleep (configured to 200 seconds by default)
-    # If currently locked, poll faster (every 3s) so teacher's unlock command takes effect immediately!
-    if ($global:LockProcess -and (-not $global:LockProcess.HasExited)) {
-        Start-Sleep -Seconds 3
+    # Heartbeat interval sleep (3 seconds for immediate response to teacher commands)
+    # If currently locked or in Exam Mode, run continuous 500ms watchdog checks!
+    if (($global:LockProcess -and (-not $global:LockProcess.HasExited)) -or $global:ExamModeActive) {
+        for ($sub = 0; $sub -lt 6; $sub++) {
+            if ($global:ExamModeActive) {
+                Check-ExamWatchdog
+            }
+            Start-Sleep -Milliseconds 500
+        }
     } else {
         Start-Sleep -Seconds $intervalSeconds
     }
@@ -564,7 +857,7 @@ while ($true) {
     const host = req.headers['x-forwarded-host'] || req.get('host');
     const fullServerUrl = (req.query.server as string) || `${protocol}://${host}/api/agent/ping`;
     const roomNumber = (req.query.room as string) || '809';
-    const intervalSeconds = (req.query.interval as string) || '200';
+    const intervalSeconds = (req.query.interval as string) || '3';
 
     const script = buildAgentScript(fullServerUrl, roomNumber, intervalSeconds);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -578,7 +871,7 @@ while ($true) {
     const host = req.headers['x-forwarded-host'] || req.get('host');
     const fullServerUrl = (req.query.server as string) || `${protocol}://${host}/api/agent/ping`;
     const roomNumber = (req.query.room as string) || '809';
-    const intervalSeconds = (req.query.interval as string) || '200';
+    const intervalSeconds = (req.query.interval as string) || '3';
 
     const script = buildAgentScript(fullServerUrl, roomNumber, intervalSeconds);
     const base64Script = Buffer.from(script, 'utf-8').toString('base64');
@@ -603,10 +896,13 @@ echo.
 set "LAB_DIR=C:\\LabAgent"
 if not exist "%LAB_DIR%" mkdir "%LAB_DIR%"
 
-echo [1/2] Writing Agent Script to %LAB_DIR%\\agent.ps1...
+echo [1/3] Stopping any previous background agent instance...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*agent.ps1*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+
+echo [2/3] Writing Updated Agent Script to %LAB_DIR%\\agent.ps1...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$b64 = '${base64Script}'; $bytes = [System.Convert]::FromBase64String($b64); $str = [System.Text.Encoding]::UTF8.GetString($bytes); [System.IO.File]::WriteAllText('%LAB_DIR%\\agent.ps1', $str, [System.Text.Encoding]::UTF8)"
 
-echo [2/2] Starting Station Agent with Kernel BlockInput & Taskbar Suppression...
+echo [3/3] Starting Station Agent with Real-Time Exam Firewall & Anti-AI Watchdog...
 echo Keep this window running or minimized.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
 `;
@@ -622,7 +918,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
     const host = req.headers['x-forwarded-host'] || req.get('host');
     const fullServerUrl = (req.query.server as string) || `${protocol}://${host}/api/agent/ping`;
     const roomNumber = (req.query.room as string) || '809';
-    const intervalSeconds = (req.query.interval as string) || '200';
+    const intervalSeconds = (req.query.interval as string) || '3';
 
     const script = buildAgentScript(fullServerUrl, roomNumber, intervalSeconds);
     res.json({ script });
