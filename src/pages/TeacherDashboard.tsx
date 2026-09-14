@@ -540,7 +540,14 @@ Size: ${f?.size ? (f.size / 1024).toFixed(1) : '0'} KB
             </div>
             
             <div className="text-center">
-              <p className="font-bold text-white">PC {i + 1}</p>
+              <div className="flex items-center justify-center gap-1.5">
+                <p className="font-bold text-white">PC {i + 1}</p>
+                {(pc.device_bound || pc.is_fixed || pc.is_real) && (
+                  <span className="text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30" title="Workstation permanently bound to this physical computer">
+                    Fixed
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-400 font-mono">{pc?.ip || 'Unknown'}</p>
             </div>
 

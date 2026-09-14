@@ -68,23 +68,18 @@ async function startServer() {
         
         // Deterministic randomization based on PC index for stability
         const pcSeed = (labIndex * 25) + i;
-        const isOffline = pcSeed % 15 === 0;
-        const isIssue = pcSeed % 12 === 0 && !isOffline;
-        const isLocked = pcSeed % 10 === 0 && !isOffline;
-        const isExam = pcSeed % 8 === 0 && !isOffline;
-        const needsHelp = pcSeed % 7 === 0 && !isOffline && !isLocked;
+        const isOffline = room === '809' ? true : (pcSeed % 15 === 0);
+        const isIssue = room === '809' ? false : (pcSeed % 12 === 0 && !isOffline);
+        const isLocked = room === '809' ? false : (pcSeed % 10 === 0 && !isOffline);
+        const isExam = room === '809' ? false : (pcSeed % 8 === 0 && !isOffline);
+        const needsHelp = room === '809' ? false : (pcSeed % 7 === 0 && !isOffline && !isLocked);
 
-        let status = 'online';
-        let cpu_usage = Math.floor(Math.random() * 30) + 5;
-        let ram_usage = Math.floor(Math.random() * 40) + 20;
-        let lastSeen = new Date().toISOString();
+        let status = isOffline ? 'offline' : 'online';
+        let cpu_usage = isOffline ? 0 : (Math.floor(Math.random() * 30) + 5);
+        let ram_usage = isOffline ? 0 : (Math.floor(Math.random() * 40) + 20);
+        let lastSeen = isOffline ? new Date(Date.now() - 3600000).toISOString() : new Date().toISOString();
         
-        if (isOffline) {
-          status = 'offline';
-          cpu_usage = 0;
-          ram_usage = 0;
-          lastSeen = new Date(Date.now() - 3600000).toISOString();
-        } else if (isIssue) {
+        if (isIssue) {
           status = 'issue';
           cpu_usage = Math.floor(Math.random() * 20) + 80;
           ram_usage = Math.floor(Math.random() * 20) + 80;
@@ -175,18 +170,21 @@ Write-Host "  LabMonitor Pro Agent Initialized" -ForegroundColor Green
 Write-Host "  Room: $roomNumber | Server: $serverUrl" -ForegroundColor Yellow
 Write-Host "==================================================" -ForegroundColor Cyan
 
-# Auto-Elevation Check: Prompt for Administrator if not elevated so physical BlockInput works 100%
+# Auto-Elevation Check: Prompt for Administrator if not elevated so physical BlockInput, Firewall & Enterprise Policies work 100%
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
+    Write-Host "-> Elevating process to Administrator for Kernel-Level Hardware Freeze & Firewall AI Blocking..." -ForegroundColor Yellow
     if ($PSCommandPath) {
-        Write-Host "-> Elevating process to Administrator for Kernel-Level Hardware Input Freeze..." -ForegroundColor Yellow
-        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath
+        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File '$PSCommandPath'"
         exit
     } else {
-        Write-Host "[!] Note: Please launch PowerShell as Administrator to allow Windows to freeze physical mouse and keyboard inputs." -ForegroundColor Yellow
+        $rawUrl = "$serverUrl".Replace("/api/agent/ping", "/agent.ps1?room=$roomNumber&interval=$intervalSeconds")
+        $elevateCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('$rawUrl'))"
+        Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command $elevateCmd"
+        exit
     }
 } else {
-    Write-Host "[OK] Administrator privileges verified: Hardware Input Freeze & Taskbar lockdown active." -ForegroundColor Green
+    Write-Host "[OK] Administrator privileges verified: Hardware Input Freeze, Firewall & Browser Policies active." -ForegroundColor Green
 }
 
 # Load Win32 API Definitions for Hardware Freeze & Window Control
@@ -216,6 +214,9 @@ public class Win32Lock {
 
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("wininet.dll", SetLastError = true)]
+    public static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 }
 "@
 }
@@ -235,8 +236,8 @@ $global:ExamBlockedDomains = @(
     "chatgpt.com", "www.chatgpt.com", "chat.openai.com", "api.openai.com", "openai.com", "platform.openai.com",
     "oaistatic.com", "cdn.oaistatic.com", "oaiusercontent.com", "auth0.openai.com",
     "claude.ai", "www.claude.ai", "anthropic.com", "api.anthropic.com",
-    "gemini.google.com", "bard.google.com", "generativelanguage.googleapis.com",
-    "copilot.microsoft.com", "edgeservices.bing.com", "sydney.bing.com",
+    "gemini.google.com", "bard.google.com", "generativelanguage.googleapis.com", "ai.google.dev",
+    "copilot.microsoft.com", "edgeservices.bing.com", "sydney.bing.com", "copilot.com", "www.copilot.com",
     "perplexity.ai", "www.perplexity.ai",
     "deepseek.com", "www.deepseek.com", "chat.deepseek.com", "api.deepseek.com",
     "poe.com", "www.poe.com",
@@ -244,6 +245,8 @@ $global:ExamBlockedDomains = @(
     "huggingface.co", "chat.huggingface.co",
     "mistral.ai", "chat.mistral.ai",
     "blackbox.ai", "www.blackbox.ai",
+    "cohere.com", "www.cohere.com",
+    "grok.com", "www.grok.com", "x.ai", "api.x.ai",
     "google.com", "www.google.com", "google.com.bd", "www.google.com.bd", "encrypted.google.com",
     "bing.com", "www.bing.com",
     "duckduckgo.com", "www.duckduckgo.com",
@@ -255,7 +258,7 @@ $global:ExamBlockedDomains = @(
 function Check-ExamWatchdog {
     if (-not $global:ExamModeActive) { return }
 
-    $aiRegex = "(ChatGPT|OpenAI|Claude|Gemini|Copilot|Perplexity|DeepSeek|Google Search|\\bGoogle\\b|duckduckgo|bing\\.com|chat\\.openai\\.com|chatgpt\\.com|blackbox\\.ai|poe\\.com)"
+    $aiRegex = "(ChatGPT|OpenAI|Claude|Gemini|Copilot|Perplexity|DeepSeek|Google|Bing|DuckDuckGo|Baidu|Yahoo|Blackbox|Poe|Mistral|Grok|গুগল|Search|New Tab|New tab|নতুন ট্যাব)"
 
     # 1. Terminate any dedicated desktop AI apps
     try {
@@ -274,16 +277,17 @@ function Check-ExamWatchdog {
             Write-Host " [!] EXAM VIOLATION INTERCEPTED: $procName ('$title')" -ForegroundColor Red
             
             # Sound hardware alarm
-            try { [System.Console]::Beep(1500, 300) } catch {}
+            try { [System.Console]::Beep(1800, 400) } catch {}
 
-            # Immediately kill the violating browser process/window
+            # Immediately terminate the entire browser process so all tabs close
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
 
             # Report violation directly to Teacher Dashboard
             try {
                 $targetId = if ($global:StationIp) { $global:StationIp.Replace('.', '-') } else { 'unknown' }
                 $violationPayload = @{
-                    message = "Exam Violation: Student opened '$title' ($procName) - Process terminated by Exam Watchdog!"
+                    message = "🚨 PROHIBITED ACCESS DETECTED: Student opened '$title' ($procName) - Browser instantly KILLED by Exam Watchdog!"
                 } | ConvertTo-Json
                 $vioUrl = $serverUrl.Replace("/agent/ping", "/pcs/$targetId/violation")
                 Invoke-RestMethod -Uri $vioUrl -Method Post -Body $violationPayload -ContentType "application/json" -TimeoutSec 2 -ErrorAction SilentlyContinue
@@ -315,20 +319,49 @@ function Enable-ExamMode {
     Write-Host " [!] ACTIVATING EXAM MODE: HARD-BLOCKING AI & SEARCH" -ForegroundColor Red
     Write-Host "==================================================" -ForegroundColor Red
 
-    # 1. Resolve REAL external IP addresses of AI providers using external DNS servers (1.1.1.1 & 8.8.8.8) BEFORE modifying hosts file!
+    # 0. Windows System Internet Proxy Blackhole (Forces all browsers to route unauthorized traffic to dead sinkhole)
+    try {
+        $serverHost = if ($serverUrl -match 'https?://([^/:]+)') { $matches[1] } else { "*.run.app" }
+        $bypassList = "<local>;localhost;127.0.0.1;192.168.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;*.run.app;$serverHost"
+
+        $proxyRegPaths = @(
+            "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+            "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+        )
+        Get-ChildItem "Registry::HKEY_USERS" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "S-1-5-21-" -and $_.Name -notmatch "_Classes" } | ForEach-Object {
+            $proxyRegPaths += "Registry::$($_.Name)\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+        }
+
+        foreach ($p in $proxyRegPaths) {
+            try {
+                if (-not (Test-Path $p)) { New-Item -Path $p -Force -ErrorAction SilentlyContinue | Out-Null }
+                Set-ItemProperty -Path $p -Name "ProxyEnable" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $p -Name "ProxyServer" -Value "127.0.0.1:9999" -Type String -Force -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $p -Name "ProxyOverride" -Value $bypassList -Type String -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
+
+        # Instantly propagate to all running browsers (Chrome, Edge, etc.)
+        try {
+            [Win32Lock]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+            [Win32Lock]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+        } catch {}
+        Write-Host "[OK] Windows Internet Proxy Blackhole activated: all unauthorized traffic trapped in dead sinkhole." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error setting proxy: $_" -ForegroundColor DarkYellow
+    }
+
+    # 1. Resolve REAL external IP addresses of AI providers using .NET DNS resolver BEFORE modifying hosts file!
     $realAiIps = @()
     $dnsTargets = @(
         "chatgpt.com", "chat.openai.com", "api.openai.com", "cdn.oaistatic.com", "oaistatic.com", "oaiusercontent.com",
-        "claude.ai", "api.anthropic.com", "gemini.google.com", "deepseek.com", "perplexity.ai"
+        "claude.ai", "api.anthropic.com", "gemini.google.com", "deepseek.com", "perplexity.ai",
+        "google.com", "www.google.com", "bing.com", "copilot.microsoft.com"
     )
     foreach ($target in $dnsTargets) {
         try {
-            $resolved = Resolve-DnsName -Name $target -Server 1.1.1.1 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress } | Select-Object -ExpandProperty IPAddress
-            if ($resolved) { $realAiIps += $resolved }
-        } catch {}
-        try {
-            $resolved2 = Resolve-DnsName -Name $target -Server 8.8.8.8 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress } | Select-Object -ExpandProperty IPAddress
-            if ($resolved2) { $realAiIps += $resolved2 }
+            $ips = [System.Net.Dns]::GetHostAddresses($target) | ForEach-Object { $_.IPAddressToString }
+            if ($ips) { $realAiIps += $ips }
         } catch {}
     }
     $global:ExamBlockedIps = $realAiIps | Select-Object -Unique
@@ -336,31 +369,85 @@ function Enable-ExamMode {
     # 2. Windows Defender Firewall Outbound Block Rule (Blocks packets at network kernel)
     try {
         Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -ErrorAction SilentlyContinue | Out-Null
+        Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-QUIC" -ErrorAction SilentlyContinue | Out-Null
+
+        # Block QUIC UDP port 443 so browsers cannot bypass DNS or Enterprise policies
+        New-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-QUIC" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443 -Enabled True -Profile Any -ErrorAction SilentlyContinue | Out-Null
+
         if ($global:ExamBlockedIps -and $global:ExamBlockedIps.Count -gt 0) {
             New-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -Direction Outbound -Action Block -RemoteAddress $global:ExamBlockedIps -Enabled True -Profile Any -ErrorAction SilentlyContinue | Out-Null
-            Write-Host "[OK] Windows Firewall kernel block rule active on $($global:ExamBlockedIps.Count) AI IPs." -ForegroundColor Green
+            Write-Host "[OK] Windows Firewall kernel block rule active on $($global:ExamBlockedIps.Count) AI & Search IPs." -ForegroundColor Green
         }
     } catch {
         Write-Host "[!] Firewall rule notice: $_" -ForegroundColor DarkYellow
     }
 
-    # 3. Browser Enterprise Policy: Enforce URLBlocklist & DISABLE DNS-over-HTTPS (Chrome & Edge)
+    # 3. Browser Enterprise Policy: Strict URLBlocklist & URLAllowlist (Chrome & Edge)
     try {
         $blockRules = @(
-            "*chatgpt.com*",
-            "*openai.com*",
-            "*claude.ai*",
-            "*anthropic.com*",
-            "*gemini.google.com*",
-            "*bard.google.com*",
-            "*copilot.microsoft.com*",
-            "*perplexity.ai*",
-            "*deepseek.com*",
-            "*poe.com*",
-            "*blackbox.ai*",
-            "*google.com*",
-            "*bing.com*",
-            "*duckduckgo.com*"
+            "google.com",
+            "*.google.com",
+            "*://*.google.com/*",
+            "*://google.com/*",
+            "google.com.bd",
+            "*.google.com.bd",
+            "*://*.google.com.bd/*",
+            "chatgpt.com",
+            "*.chatgpt.com",
+            "*://*.chatgpt.com/*",
+            "openai.com",
+            "*.openai.com",
+            "*://*.openai.com/*",
+            "claude.ai",
+            "*.claude.ai",
+            "*://*.claude.ai/*",
+            "anthropic.com",
+            "*.anthropic.com",
+            "gemini.google.com",
+            "*.gemini.google.com",
+            "bard.google.com",
+            "*.bard.google.com",
+            "perplexity.ai",
+            "*.perplexity.ai",
+            "*://*.perplexity.ai/*",
+            "deepseek.com",
+            "*.deepseek.com",
+            "*://*.deepseek.com/*",
+            "copilot.microsoft.com",
+            "*.copilot.microsoft.com",
+            "copilot.com",
+            "*.copilot.com",
+            "bing.com",
+            "*.bing.com",
+            "*://*.bing.com/*",
+            "duckduckgo.com",
+            "*.duckduckgo.com",
+            "poe.com",
+            "*.poe.com",
+            "blackbox.ai",
+            "*.blackbox.ai",
+            "huggingface.co",
+            "*.huggingface.co",
+            "mistral.ai",
+            "*.mistral.ai",
+            "grok.com",
+            "*.grok.com",
+            "ai.google.dev",
+            "cohere.com",
+            "*.cohere.com"
+        )
+
+        $allowRules = @(
+            "http://localhost:*",
+            "https://localhost:*",
+            "http://127.0.0.1:*",
+            "https://127.0.0.1:*",
+            "http://192.168.*",
+            "https://192.168.*",
+            "http://10.*",
+            "https://10.*",
+            "*.run.app",
+            "https://ais-*.run.app"
         )
 
         $policyPaths = @(
@@ -376,23 +463,40 @@ function Enable-ExamMode {
                 # Force browser to use OS DNS (so hosts file works) & disable DoH
                 Set-ItemProperty -Path $basePath -Name "DnsOverHttpsMode" -Value "off" -Force -ErrorAction SilentlyContinue
                 Set-ItemProperty -Path $basePath -Name "BuiltInDnsClientEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+                # Disable Incognito so student cannot open incognito window to bypass
+                Set-ItemProperty -Path $basePath -Name "IncognitoModeAvailability" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+                # Disable F12 Developer Tools
+                Set-ItemProperty -Path $basePath -Name "DeveloperToolsAvailability" -Value 2 -Type DWord -Force -ErrorAction SilentlyContinue
 
+                # Enforce URLBlocklist
                 $urlListPath = "$basePath\\URLBlocklist"
-                if (-not (Test-Path $urlListPath)) { New-Item -Path $urlListPath -Force -ErrorAction SilentlyContinue | Out-Null }
+                if (Test-Path $urlListPath) { Remove-Item -Path $urlListPath -Recurse -Force -ErrorAction SilentlyContinue }
+                New-Item -Path $urlListPath -Force -ErrorAction SilentlyContinue | Out-Null
 
                 $i = 1
                 foreach ($rule in $blockRules) {
                     Set-ItemProperty -Path $urlListPath -Name "$i" -Value $rule -Force -ErrorAction SilentlyContinue
                     $i++
                 }
+
+                # Enforce URLAllowlist
+                $allowListPath = "$basePath\\URLAllowlist"
+                if (Test-Path $allowListPath) { Remove-Item -Path $allowListPath -Recurse -Force -ErrorAction SilentlyContinue }
+                New-Item -Path $allowListPath -Force -ErrorAction SilentlyContinue | Out-Null
+
+                $j = 1
+                foreach ($rule in $allowRules) {
+                    Set-ItemProperty -Path $allowListPath -Name "$j" -Value $rule -Force -ErrorAction SilentlyContinue
+                    $j++
+                }
             } catch {}
         }
-        Write-Host "[OK] Browser URLBlocklist enterprise policy enforced." -ForegroundColor Green
+        Write-Host "[OK] Browser URLBlocklist & URLAllowlist policies enforced (Incognito & DevTools disabled)." -ForegroundColor Green
     } catch {
         Write-Host "[!] Error configuring browser policies: $_" -ForegroundColor DarkYellow
     }
 
-    # 4. Windows hosts file redirect to 127.0.0.1
+    # 4. Windows hosts file redirect to 127.0.0.1 & 0.0.0.0
     try {
         $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
         $hostsBackup = "$env:SystemRoot\\System32\\drivers\\etc\\hosts.exam.bak"
@@ -406,6 +510,7 @@ function Enable-ExamMode {
         $sb.AppendLine("\`r\`n# --- LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST START ---")
         foreach ($domain in $global:ExamBlockedDomains) {
             $sb.AppendLine("127.0.0.1 $domain")
+            $sb.AppendLine("0.0.0.0 $domain")
             $sb.AppendLine("::1 $domain")
         }
         $sb.AppendLine("# --- LAB MONITOR EXAM MODE AI/SEARCH BLOCKLIST END ---")
@@ -426,7 +531,7 @@ function Enable-ExamMode {
 
     # 6. Show Notification to Student
     try {
-        Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command ""Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Exam Mode is now ACTIVE on this workstation.\`n\`nAI Tools (ChatGPT, Claude, Gemini, DeepSeek, Copilot) and Search Engines (Google, Bing) have been blocked by the Administrator.\`n\`nAny attempt to access AI tools will sound an alarm and report a violation to the Instructor.', 'Lab Administrator - Exam Mode Active', 'OK', 'Warning')"""
+        Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command ""Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Exam Mode is now ACTIVE on this workstation.\`n\`nAI Tools (ChatGPT, Claude, Gemini, DeepSeek, Copilot) and Search Engines (Google, Bing) have been completely blocked.\`n\`nAny attempt to access AI tools will sound an alarm and report a violation to the Instructor.', 'Lab Administrator - Exam Mode Active', 'OK', 'Warning')"""
     } catch {}
 
     Write-Host "[OK] Workstation is in EXAM LOCKDOWN. AI & Google access blocked." -ForegroundColor Green
@@ -439,7 +544,32 @@ function Disable-ExamMode {
     Write-Host " [OK] DEACTIVATING EXAM MODE: RESTORING ACCESS" -ForegroundColor Green
     Write-Host "==================================================" -ForegroundColor Green
 
-    # 1. Clean Browser URLBlocklist policies
+    # 0. Restore Windows System Internet Proxy to normal
+    try {
+        $proxyRegPaths = @(
+            "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+            "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+        )
+        Get-ChildItem "Registry::HKEY_USERS" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "S-1-5-21-" -and $_.Name -notmatch "_Classes" } | ForEach-Object {
+            $proxyRegPaths += "Registry::$($_.Name)\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+        }
+
+        foreach ($p in $proxyRegPaths) {
+            try {
+                if (Test-Path $p) {
+                    Set-ItemProperty -Path $p -Name "ProxyEnable" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+                }
+            } catch {}
+        }
+
+        try {
+            [Win32Lock]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+            [Win32Lock]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+        } catch {}
+        Write-Host "[OK] Windows Internet Proxy restored to normal." -ForegroundColor Green
+    } catch {}
+
+    # 1. Clean Browser URLBlocklist and URLAllowlist policies
     $policyPaths = @(
         "HKLM:\\SOFTWARE\\Policies\\Google\\Chrome",
         "HKCU:\\Software\\Policies\\Google\\Chrome",
@@ -449,6 +579,9 @@ function Disable-ExamMode {
     foreach ($basePath in $policyPaths) {
         try {
             Remove-Item -Path "$basePath\\URLBlocklist" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$basePath\\URLAllowlist" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $basePath -Name "IncognitoModeAvailability" -Force -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $basePath -Name "DeveloperToolsAvailability" -Force -ErrorAction SilentlyContinue
             Remove-ItemProperty -Path $basePath -Name "DnsOverHttpsMode" -Force -ErrorAction SilentlyContinue
             Remove-ItemProperty -Path $basePath -Name "BuiltInDnsClientEnabled" -Force -ErrorAction SilentlyContinue
         } catch {}
@@ -457,6 +590,7 @@ function Disable-ExamMode {
     # 2. Remove Windows Firewall rules
     try {
         Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-Block" -ErrorAction SilentlyContinue | Out-Null
+        Remove-NetFirewallRule -DisplayName "LabMonitor-Exam-AI-QUIC" -ErrorAction SilentlyContinue | Out-Null
     } catch {}
 
     # 3. Restore original hosts file
@@ -715,6 +849,13 @@ function Check-Internet {
     }
 }
 
+# Wait up to 15 seconds at Windows boot for network interface initialization
+$netRetries = 0
+while (-not (Check-Internet) -and $netRetries -lt 8) {
+    Start-Sleep -Seconds 2
+    $netRetries++
+}
+
 while ($true) {
     try {
         $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { 
@@ -730,6 +871,21 @@ while ($true) {
             $ip = "192.168.1." + (Get-Random -Minimum 10 -Maximum 99)
         }
         $global:StationIp = $ip
+
+        # Check if this station is bound to a designated PC ID in station.txt
+        $stationId = $null
+        $stationFile = "$LAB_DIR\\station.txt"
+        if (Test-Path $stationFile) {
+            try {
+                $rawStation = (Get-Content $stationFile -Raw -ErrorAction SilentlyContinue)
+                if ($rawStation) {
+                    $stationId = $rawStation.Trim()
+                }
+            } catch {}
+        }
+
+        $finalId = if ($stationId) { $stationId } else { $ip.Replace('.', '-') }
+        $finalName = if ($stationId) { $stationId } else { "PC " + ($ip.Split('.')[-1]) }
 
         $cpu = Get-WmiObject Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average
         $os = Get-WmiObject Win32_OperatingSystem -ErrorAction SilentlyContinue
@@ -750,6 +906,9 @@ while ($true) {
         $payload = @{
             room = $roomNumber
             ip = $ip
+            id = $finalId
+            name = $finalName
+            hostname = $env:COMPUTERNAME
             has_internet = $hasInternet
             cpu_usage = [int]$cpu
             ram_usage = [int]$ram
@@ -836,13 +995,13 @@ while ($true) {
     }
 
     # Heartbeat interval sleep (3 seconds for immediate response to teacher commands)
-    # If currently locked or in Exam Mode, run continuous 500ms watchdog checks!
+    # If currently locked or in Exam Mode, run continuous 250ms watchdog checks (4 times a second)!
     if (($global:LockProcess -and (-not $global:LockProcess.HasExited)) -or $global:ExamModeActive) {
-        for ($sub = 0; $sub -lt 6; $sub++) {
+        for ($sub = 0; $sub -lt 12; $sub++) {
             if ($global:ExamModeActive) {
                 Check-ExamWatchdog
             }
-            Start-Sleep -Milliseconds 500
+            Start-Sleep -Milliseconds 250
         }
     } else {
         Start-Sleep -Seconds $intervalSeconds
@@ -865,7 +1024,7 @@ while ($true) {
     res.send(script);
   });
 
-  // Serve 1-click Windows Batch launcher that embeds the full agent script self-contained
+  // Serve 1-click Windows Batch launcher that embeds the full agent script as a permanent Windows Boot Service
   app.get('/install-agent.bat', (req, res) => {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.headers['x-forwarded-host'] || req.get('host');
@@ -877,39 +1036,120 @@ while ($true) {
     const base64Script = Buffer.from(script, 'utf-8').toString('base64');
 
     const batContent = `@echo off
-:: LabMonitor Station Self-Contained Auto-Elevator & Hardware Freeze Agent
+:: LabMonitor Station Windows Boot Background Agent (Zero-Browser Dependency)
+setlocal EnableDelayedExpansion
+
 net session >nul 2>&1
 if %errorLevel% neq 0 (
-    echo Elevating to Administrator...
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    echo [LabMonitor] Requesting Administrator Privileges to Install System Boot Service...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c \"\"%~f0\" %*\"' -Verb RunAs"
     exit /b
 )
 
-title LabMonitor Student PC Agent (Room ${roomNumber})
-color 0b
+title LabMonitor Hardware Boot Agent (Room ${roomNumber})
+color 0a
 echo =================================================================
-echo   LabMonitor Student PC Workstation Lock & Freeze Agent
-echo   Room: ${roomNumber} | Status: Administrator Elevated (OK)
+echo   LabMonitor Permanent Windows Hardware Boot Agent
+echo   Room: ${roomNumber} ^| Boot Mode: System Background Service
+echo =================================================================
+echo.
+echo   * Operates completely independent of any web browser.
+echo   * Turns ONLINE automatically when the computer turns ON.
+echo   * Turns OFFLINE automatically when the computer powers OFF.
+echo   * Closing or opening browser tabs has ZERO effect on PC status.
+echo.
 echo =================================================================
 echo.
 
 set "LAB_DIR=C:\\LabAgent"
 if not exist "%LAB_DIR%" mkdir "%LAB_DIR%"
 
-echo [1/3] Stopping any previous background agent instance...
-powershell -NoProfile -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*agent.ps1*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+:: Optional Station Binding (e.g. 192-168-0-12 or PC 1)
+set "STATION_ARG=%~1"
+if not "%STATION_ARG%"=="" (
+    echo %STATION_ARG% > "%LAB_DIR%\\station.txt"
+    echo [Config] Workstation explicitly bound to: %STATION_ARG%
+) else (
+    if exist "%LAB_DIR%\\station.txt" (
+        set /p SAVED_ID=<"%LAB_DIR%\\station.txt"
+        echo [Config] Preserving existing station binding: !SAVED_ID!
+    )
+)
 
-echo [2/3] Writing Updated Agent Script to %LAB_DIR%\\agent.ps1...
+echo [1/5] Terminating any previous agent instances...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*agent.ps1*' -or $_.CommandLine -like '*run-agent.vbs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+
+echo [2/5] Deploying Updated Hardware Agent to %LAB_DIR%\\agent.ps1...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$b64 = '${base64Script}'; $bytes = [System.Convert]::FromBase64String($b64); $str = [System.Text.Encoding]::UTF8.GetString($bytes); [System.IO.File]::WriteAllText('%LAB_DIR%\\agent.ps1', $str, [System.Text.Encoding]::UTF8)"
 
-echo [3/3] Starting Station Agent with Real-Time Exam Firewall & Anti-AI Watchdog...
-echo Keep this window running or minimized.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
+echo [3/5] Creating Invisible Headless Background Runner (run-agent.vbs)...
+(
+echo Set WshShell = CreateObject^("WScript.Shell"^)
+echo WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""%LAB_DIR%\\agent.ps1""", 0, False
+) > "%LAB_DIR%\\run-agent.vbs"
+
+echo [4/5] Registering Windows Task Scheduler System Boot Service...
+:: Schedule to run at Windows startup with highest privileges (no login or browser needed!)
+schtasks /create /tn "LabMonitorBootAgent" /tr "wscript.exe \"%LAB_DIR%\\run-agent.vbs\"" /sc ONSTART /ru "SYSTEM" /rl HIGHEST /f >nul 2>&1
+:: Also register at user logon as fallback
+schtasks /create /tn "LabMonitorLogonAgent" /tr "wscript.exe \"%LAB_DIR%\\run-agent.vbs\"" /sc ONLOGON /rl HIGHEST /f >nul 2>&1
+:: Registry Run key for all users
+reg add "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "LabMonitorHardwareAgent" /t REG_SZ /d "wscript.exe \"%LAB_DIR%\\run-agent.vbs\"" /f >nul 2>&1
+
+:: Create Uninstaller
+(
+echo @echo off
+echo echo Stopping and removing LabMonitor Agent...
+echo schtasks /delete /tn "LabMonitorBootAgent" /f ^>nul 2^>^&1
+echo schtasks /delete /tn "LabMonitorLogonAgent" /f ^>nul 2^>^&1
+echo reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "LabMonitorHardwareAgent" /f ^>nul 2^>^&1
+echo powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*agent.ps1*' } | Stop-Process -Force"
+echo echo LabMonitor Agent uninstalled successfully.
+echo timeout /t 3
+) > "%LAB_DIR%\\uninstall.bat"
+
+echo [5/5] Launching Silent Background Hardware Service NOW...
+wscript.exe "%LAB_DIR%\\run-agent.vbs"
+
+echo.
+echo =================================================================
+echo   [SUCCESS] HARDWARE AGENT IS NOW PERMANENTLY RUNNING!
+echo =================================================================
+echo   * Status: Active in Windows Background (Headless)
+echo   * Auto-Start: Enabled on PC Boot (Task Scheduler ONSTART)
+echo   * Browser Independent: You can close any browser tab or window.
+echo   * The PC will stay ONLINE as long as this computer is powered on.
+echo   * When you turn off / shut down the PC, it will show OFFLINE.
+echo =================================================================
+echo.
+timeout /t 5
+exit /b
 `;
 
     res.setHeader('Content-Type', 'application/x-bat');
     res.setHeader('Content-Disposition', `attachment; filename="run-lab-agent-room-${roomNumber}.bat"`);
     res.send(batContent);
+  });
+
+  // Serve 1-click Windows Uninstaller Batch
+  app.get('/uninstall-agent.bat', (req, res) => {
+    const bat = `@echo off
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+echo Stopping and removing LabMonitor Windows Agent...
+schtasks /delete /tn "LabMonitorBootAgent" /f >nul 2>&1
+schtasks /delete /tn "LabMonitorLogonAgent" /f >nul 2>&1
+reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "LabMonitorHardwareAgent" /f >nul 2>&1
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*agent.ps1*' -or $_.CommandLine -like '*run-agent.vbs*' } | Stop-Process -Force -ErrorAction SilentlyContinue"
+echo [OK] LabMonitor Agent successfully removed from this PC.
+timeout /t 3
+`;
+    res.setHeader('Content-Type', 'application/x-bat');
+    res.setHeader('Content-Disposition', 'attachment; filename="uninstall-lab-agent.bat"');
+    res.send(bat);
   });
 
   // Serve script as JSON for React setup page
@@ -927,16 +1167,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
   // API to receive pings from the PowerShell Agent
   app.post('/api/agent/ping', (req, res) => {
     const pcData = req.body;
-    if (!pcData || !pcData.ip) {
-      return res.status(400).json({ success: false, error: 'IP address is required' });
+    if (!pcData || (!pcData.ip && !pcData.id)) {
+      return res.status(400).json({ success: false, error: 'IP address or ID is required' });
     }
 
     const now = new Date();
-    const existingIndex = connectedPCs.findIndex(pc => pc.ip === pcData.ip);
+    const pcId = pcData.id || pcData.ip.replace(/\./g, '-');
+    const pcIp = pcData.ip || pcId.replace(/-/g, '.');
+    const pcRoom = pcData.room || '809';
 
-    const pcId = pcData.ip.replace(/\./g, '-');
-    const targetPc = connectedPCs.find(p => p.id === pcId || p.ip === pcData.ip);
-    const pcRoom = pcData.room || targetPc?.room || '809';
+    const existingIndex = connectedPCs.findIndex(pc => pc.id === pcId || pc.ip === pcIp || pc.ip === pcData.ip);
+    const targetPc = connectedPCs.find(p => p.id === pcId || p.ip === pcIp || p.ip === pcData.ip);
     const isRoomLocked = !!(labStates[pcRoom]?.locked || labStates['ALL']?.locked);
     const isRoomExam = !!(labStates[pcRoom]?.exam_mode || labStates['ALL']?.exam_mode);
 
@@ -947,31 +1188,45 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
         ...existingPc,
         ...pcData,
         id: existingPc.id,
+        ip: pcIp,
         room: pcData.room || existingPc.room,
         locked: existingPc.locked || isRoomLocked,
         exam_mode: existingPc.exam_mode || isRoomExam,
         needs_help: existingPc.needs_help,
         lastSeen: now.toISOString(),
-        status: pcData.status || 'online'
+        status: 'online',
+        is_real: true,
+        device_bound: true,
+        is_fixed: true
       };
     } else {
-      // New PC connecting
+      // New PC connecting - if room has offline mock PC, replace the first one or prepend
+      const placeholderIdx = connectedPCs.findIndex(p => (p.room === pcRoom || p.room === String(pcRoom)) && !p.is_real);
       const pcEntry = {
         ...pcData,
-        id: pcData.ip.replace(/\./g, '-'),
+        id: pcId,
+        ip: pcIp,
+        name: pcData.name || `PC ${pcIp.split('.').pop()}`,
         lastSeen: now.toISOString(),
-        status: pcData.status || 'online',
-        room: pcData.room || '809',
+        status: 'online',
+        room: pcRoom,
         locked: isRoomLocked,
         exam_mode: isRoomExam,
         needs_help: false,
         cpu_usage: pcData.cpu_usage || 0,
-        ram_usage: pcData.ram_usage || 0
+        ram_usage: pcData.ram_usage || 0,
+        is_real: true,
+        device_bound: true,
+        is_fixed: true
       };
-      connectedPCs.push(pcEntry);
+      if (placeholderIdx > -1) {
+        connectedPCs[placeholderIdx] = pcEntry;
+      } else {
+        connectedPCs.unshift(pcEntry);
+      }
     }
 
-    const updatedTargetPc = connectedPCs.find(p => p.id === pcId || p.ip === pcData.ip);
+    const updatedTargetPc = connectedPCs.find(p => p.id === pcId || p.ip === pcIp || p.ip === pcData.ip);
     const pendingTasks = tasks.filter(t => 
       (t.pc_id === pcId || t.pc_id === 'ALL' || (pcRoom && t.room === pcRoom && (!t.pc_id || t.pc_id === pcId || t.pc_id === 'ALL'))) && 
       t.status === 'pending'
@@ -987,28 +1242,79 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
     });
   });
 
-  // API to get all connected PCs
+  // Browser-level student dashboard heartbeat API
+  app.post('/api/pcs/:id/heartbeat', (req, res) => {
+    const rawId = req.params.id;
+    const body = req.body || {};
+    const room = body.room || '809';
+    const dashed = rawId.replace(/\./g, '-');
+    const dotted = rawId.replace(/-/g, '.');
+    const now = new Date();
+
+    let pc = connectedPCs.find(p => p.id === rawId || p.id === dashed || p.id === dotted || p.ip === rawId || p.ip === dotted);
+    if (!pc) {
+      // Bind to the first offline PC in the room or insert new fixed entry
+      pc = connectedPCs.find(p => (p.room === room || p.room === String(room)) && p.status === 'offline');
+    }
+
+    if (pc) {
+      pc.lastSeen = now.toISOString();
+      pc.status = 'online';
+      pc.room = room;
+      pc.is_real = true;
+      pc.device_bound = true;
+      pc.is_fixed = true;
+      const isRoomLocked = !!(labStates[room]?.locked || labStates['ALL']?.locked);
+      const isRoomExam = !!(labStates[room]?.exam_mode || labStates['ALL']?.exam_mode);
+      return res.json({ 
+        success: true, 
+        pc_id: pc.id, 
+        status: 'online', 
+        device_bound: true,
+        locked: pc.locked || isRoomLocked, 
+        exam_mode: pc.exam_mode || isRoomExam 
+      });
+    }
+
+    const newPc = {
+      id: dashed,
+      ip: dotted,
+      name: `PC ${dotted.split('.').pop()}`,
+      status: 'online',
+      room,
+      cpu_usage: 15,
+      ram_usage: 32,
+      lastSeen: now.toISOString(),
+      is_real: true,
+      device_bound: true,
+      is_fixed: true,
+      locked: false,
+      exam_mode: false,
+      needs_help: false
+    };
+    connectedPCs.unshift(newPc);
+
+    res.json({ success: true, status: 'online', device_bound: true, pc_id: newPc.id });
+  });
+
+  // API to get all connected PCs with accurate heartbeat tracking
   app.get('/api/pcs', (req, res) => {
     const now = new Date();
     const updatedPCs = connectedPCs.map(pc => {
-      const lastSeen = new Date(pc.lastSeen);
-      const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
+      const lastSeen = new Date(pc.lastSeen || 0);
+      const diffSeconds = (now.getTime() - lastSeen.getTime()) / 1000;
       const isRoomLocked = !!(labStates[pc.room]?.locked || labStates['ALL']?.locked);
       const isRoomExam = !!(labStates[pc.room]?.exam_mode || labStates['ALL']?.exam_mode);
       
-      // For demo purposes, keep non-offline PCs alive
-      if (pc.status !== 'offline' && diffMinutes > 5) {
-        pc.lastSeen = now.toISOString();
-        return { 
-          ...pc,
-          locked: pc.locked || isRoomLocked,
-          exam_mode: pc.exam_mode || isRoomExam
-        };
-      }
+      // Heartbeat is sent every 3s. If no heartbeat for > 35s, station is OFFLINE!
+      const isOffline = diffSeconds > 35;
+      const status = isOffline ? 'offline' : 'online';
 
       return {
         ...pc,
-        status: diffMinutes > 10 ? 'offline' : pc.status,
+        status,
+        cpu_usage: isOffline ? 0 : (pc.cpu_usage || 0),
+        ram_usage: isOffline ? 0 : (pc.ram_usage || 0),
         locked: pc.locked || isRoomLocked,
         exam_mode: pc.exam_mode || isRoomExam
       };
@@ -1024,14 +1330,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%LAB_DIR%\\agent.ps1"
     const pc = connectedPCs.find(p => p.id === rawId || p.id === dashed || p.id === dotted || p.ip === rawId || p.ip === dotted);
     if (pc) {
       const now = new Date();
-      const lastSeen = new Date(pc.lastSeen);
-      const diffMinutes = (now.getTime() - lastSeen.getTime()) / 60000;
-      const status = diffMinutes > 10 ? 'offline' : pc.status;
+      const lastSeen = new Date(pc.lastSeen || 0);
+      const diffSeconds = (now.getTime() - lastSeen.getTime()) / 1000;
+      const isOffline = diffSeconds > 35;
+      const status = isOffline ? 'offline' : 'online';
       const isRoomLocked = !!(labStates[pc.room]?.locked || labStates['ALL']?.locked);
       const isRoomExam = !!(labStates[pc.room]?.exam_mode || labStates['ALL']?.exam_mode);
       res.json({ 
         ...pc, 
         status,
+        cpu_usage: isOffline ? 0 : (pc.cpu_usage || 0),
+        ram_usage: isOffline ? 0 : (pc.ram_usage || 0),
         locked: pc.locked || isRoomLocked,
         exam_mode: pc.exam_mode || isRoomExam
       });
